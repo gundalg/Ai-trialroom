@@ -253,9 +253,10 @@
     const i = +$('resultImg').dataset.i || 0, url = T.results[i].url, name = 'AI-TrialRoom-' + new Date().toISOString().replace(/[:.]/g, '-') + '.jpg';
     let ok = false;
     if (window.AndroidBridge && AndroidBridge.saveImage) { try { ok = AndroidBridge.saveImage(url.split(',')[1], name) === 'ok'; } catch (e) { ok = false; } }
-    else { const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); ok = true; }
+    else if (window.top !== window) { ok = 'web'; } // inside a web viewer: downloads are blocked, use long-press
+    else { try { const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); ok = true; } catch (e) { ok = 'web'; } }
     try { const th = await downscale(url, 360, 0.8); S.looks = [th.url].concat(S.looks || []).slice(0, 12); save(); } catch (e) {}
-    $('saveNote').textContent = ok ? 'Saved to your gallery (Pictures/AI TrialRoom).' : 'Could not save. Please allow storage permission and try again.';
+    $('saveNote').textContent = ok === 'web' ? 'Saved in Recent looks. To keep it on your phone: press and hold the photo, then choose "Save image" or take a screenshot.' : ok ? 'Saved to your gallery (Pictures/AI TrialRoom).' : 'Could not save. Please allow storage permission and try again.';
     toast(ok ? 'Saved ✓' : 'Save failed');
   };
   $('btnFinish').onclick = async () => {

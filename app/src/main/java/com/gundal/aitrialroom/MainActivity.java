@@ -3,6 +3,7 @@ package com.gundal.aitrialroom;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -27,12 +28,23 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
 
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * AI TrialRoom — native shell. The app UI and the on-device AI run from bundled assets,
@@ -44,6 +56,11 @@ public class MainActivity extends Activity {
     private static final int REQ_FILE = 41, REQ_PERM = 42;
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
+    private Uri cameraUri;
+    private File cameraFile;
+    private final Map<String, String> httpResults = new ConcurrentHashMap<>();
+    private final AtomicInteger httpIds = new AtomicInteger(1);
+    private final ExecutorService pool = Executors.newFixedThreadPool(2);
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
@@ -105,8 +122,15 @@ public class MainActivity extends Activity {
                 Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
                 pick.addCategory(Intent.CATEGORY_OPENABLE);
                 pick.setType("image/*");
+                Intent camera = cameraIntent();
                 try {
-                    startActivityForResult(Intent.createChooser(pick, "Choose photo"), REQ_FILE);
+                    if (p != null && p.isCaptureEnabled() && camera != null) {
+                        startActivityForResult(camera, REQ_FILE);
+                    } else {
+                        Intent chooser = Intent.createChooser(pick, "Choose photo");
+                        if (camera != null) chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{camera});
+                        startActivityForResult(chooser, REQ_FILE);
+                    }
                 } catch (Exception e) {
                     fileCallback = null;
                     Toast.makeText(MainActivity.this, "No photo app found", Toast.LENGTH_SHORT).show();
@@ -119,6 +143,30 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
         else web.loadUrl("https://" + HOST + "/index.html");
+    }
+
+    /** Camera intent that writes the photo into the app's private cache (never the public gallery). */
+    private Intent cameraIntent() {
+        try {
+            File dir = new File(getCacheDir(), "captures");
+            if (!dir.exists() && !dir.mkdirs()) return null;
+            cameraFile = new File(dir, "live-" + System.currentTimeMillis() + ".jpg");
+            cameraUri = CaptureProvider.uriFor(this, cameraFile.getName());
+            Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            i.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
+            i.setClipData(ClipData.newRawUri("photo", cameraUri));
+            i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if (i.resolveActivity(getPackageManager()) == null) return null;
+            return i;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void clearCaptures() {
+        File dir = new File(getCacheDir(), "captures");
+        File[] fs = dir.listFiles();
+        if (fs != null) for (File f : fs) { if (!f.delete()) f.deleteOnExit(); }
     }
 
     private static WebResourceResponse notFound() {
@@ -146,6 +194,7 @@ public class MainActivity extends Activity {
         if (req == REQ_FILE && fileCallback != null) {
             Uri[] out = null;
             if (res == RESULT_OK && data != null && data.getData() != null) out = new Uri[]{data.getData()};
+            else if (res == RESULT_OK && cameraFile != null && cameraFile.exists() && cameraFile.length() > 0) out = new Uri[]{cameraUri};
             fileCallback.onReceiveValue(out);
             fileCallback = null;
         }
@@ -166,12 +215,68 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        pool.shutdownNow();
+        if (isFinishing()) clearCaptures();
         if (web != null) { web.destroy(); web = null; }
         super.onDestroy();
     }
 
+    /** HTTPS call to Google AI only, run off the UI thread. Result JSON: {status, body} or {status:0, error}. */
+    private String doHttp(String method, String url, String headersJson, String body) {
+        HttpURLConnection c = null;
+        JSONObject r = new JSONObject();
+        try {
+            URL u = new URL(url);
+            if (!"https".equals(u.getProtocol()) || !"generativelanguage.googleapis.com".equals(u.getHost())) {
+                r.put("status", 0); r.put("error", "blocked host"); return r.toString();
+            }
+            c = (HttpURLConnection) u.openConnection();
+            c.setRequestMethod(method);
+            c.setConnectTimeout(20000);
+            c.setReadTimeout(150000);
+            JSONObject h = new JSONObject(headersJson == null || headersJson.isEmpty() ? "{}" : headersJson);
+            Iterator<String> keys = h.keys();
+            while (keys.hasNext()) { String k = keys.next(); c.setRequestProperty(k, h.getString(k)); }
+            if (body != null && !body.isEmpty() && !"GET".equals(method)) {
+                c.setDoOutput(true);
+                byte[] b = body.getBytes(StandardCharsets.UTF_8);
+                c.setFixedLengthStreamingMode(b.length);
+                try (OutputStream os = c.getOutputStream()) { os.write(b); }
+            }
+            int status = c.getResponseCode();
+            InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
+            ByteArrayOutputStream bo = new ByteArrayOutputStream();
+            if (in != null) { byte[] buf = new byte[65536]; int n; while ((n = in.read(buf)) > 0) bo.write(buf, 0, n); in.close(); }
+            r.put("status", status);
+            r.put("body", new String(bo.toByteArray(), StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            try { r.put("status", 0); r.put("error", e instanceof java.net.SocketTimeoutException ? "timeout" : String.valueOf(e.getMessage())); } catch (Exception ignored) { }
+        } finally {
+            if (c != null) c.disconnect();
+        }
+        return r.toString();
+    }
+
     /** Exposed to the web app as window.AndroidBridge */
     private class Bridge {
+        @JavascriptInterface
+        public String httpStart(final String method, final String url, final String headers, final String body) {
+            final String id = "h" + httpIds.getAndIncrement();
+            pool.execute(new Runnable() {
+                @Override public void run() { httpResults.put(id, doHttp(method, url, headers, body)); }
+            });
+            return id;
+        }
+
+        @JavascriptInterface
+        public String httpPoll(String id) {
+            String r = httpResults.remove(id);
+            return r == null ? "" : r;
+        }
+
+        @JavascriptInterface
+        public void clearCaptures() { MainActivity.this.clearCaptures(); }
+
         @JavascriptInterface
         public String saveImage(String base64, String name) {
             try {

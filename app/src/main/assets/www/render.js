@@ -516,5 +516,13 @@ const TR = (() => {
     return out;
   }
 
-  return { W, H, PALETTE, OUTFITS, CODES, BGS, SKINS, drawBg, drawModel, preparePerson, compose, photoTile, avgColor, mk, disableAI: false, _geometryFromMask: geometryFromMask };
+  function brandImage(img, st, assets) {
+    const out = mk(W, H), o = out.getContext('2d');
+    const s = Math.max(W / img.width, H / img.height), dw = img.width * s, dh = img.height * s;
+    o.fillStyle = '#111'; o.fillRect(0, 0, W, H);
+    o.drawImage(img, (W - dw) / 2, Math.min(0, (H - dh) * 0.35), dw, dh);
+    brand(o, st, assets); return out;
+  }
+
+  return { brandImage, W, H, PALETTE, OUTFITS, CODES, BGS, SKINS, drawBg, drawModel, preparePerson, compose, photoTile, avgColor, mk, disableAI: false, _geometryFromMask: geometryFromMask };
 })();

@@ -148,9 +148,10 @@
       </div>
       <label class="photo-drop" id="photoDrop">
         <img id="photoPrev" alt="" class="hidden">
-        <span id="photoHint"><b>Upload full-length photo</b><br>Stand straight, facing the camera</span>
+        <span id="photoHint"><b>Choose photo from gallery</b><br>Full-length, standing straight, facing the camera</span>
         <input type="file" accept="image/*" id="photoFile" hidden>
       </label>
+      <label class="btn cam" id="camBtn">📷 Take live photo<input type="file" accept="image/*" capture="environment" id="photoCam" hidden></label>
       <p class="sub center">No photo? Choose an AI model:</p>
       <div class="models" id="models"></div>
       <p class="err" id="custErr"></p>
@@ -175,6 +176,8 @@
           <span id="garHint"><b>Upload saree photo</b><br>Its pattern is used on the look</span>
           <input type="file" accept="image/*" id="garFile" hidden>
         </label>
+        <label class="btn ghost cam" id="garCamBtn">📷 Take photo of the saree<input type="file" accept="image/*" capture="environment" id="garCam" hidden></label>
+        <p class="note" id="garNote">Any photo works: folded, on a mannequin or held in hand. The AI uses only the fabric.</p>
         <button class="link hidden" id="garClear">Remove photo, use colours instead</button>
       </div>
       <button class="btn" id="btnOutfitNext">Next</button>
@@ -199,6 +202,11 @@
     <header class="top"><button class="back" data-back>‹</button><span>Step 4 of 4 · Showroom</span></header>
     <div class="pad">
       <h2>Choose a showroom</h2>
+      <div class="seg" id="modeSeg">
+        <button data-m="ai" id="modeAI">Real AI photo</button>
+        <button data-m="quick" id="modeQuick">Quick preview (free)</button>
+      </div>
+      <p class="note" id="modeNote"></p>
       <div class="bgs" id="bgs"></div>
       <button class="btn gold" id="btnGenerate">Create my look</button>
     </div>
@@ -218,6 +226,7 @@
           <button class="btn" id="btnSave">Save to gallery</button>
           <button class="btn ghost" id="btnEdit">Change outfit</button>
         </div>
+        <button class="btn gold hidden" id="btnAgain">Try again (new AI photo)</button>
         <button class="btn ghost" id="btnFinish">Finish and delete customer photo</button>
         <p class="note" id="saveNote"></p>
       </div>
@@ -229,6 +238,25 @@
     <header class="top"><button class="back" data-back>‹</button><span>Settings</span></header>
     <div class="pad">
       <div class="card"><b>Account</b><p class="sub" id="acctInfo"></p></div>
+      <div class="card" id="aiCard">
+        <b>Real AI draping (Google Gemini)</b>
+        <p class="sub" id="aiStatus">Not set up yet.</p>
+        <label class="field"><span>Google AI key</span><input id="aiKey" type="password" autocomplete="off" placeholder="Paste your key (starts with AIza…)"></label>
+        <span class="lbl">Photo quality</span>
+        <div class="chips" id="aiQuality"></div>
+        <p class="err" id="aiErr"></p>
+        <button class="btn" id="btnAiSave">Save and check key</button>
+        <button class="btn ghost" id="btnAiRemove">Remove key</button>
+        <details class="guide"><summary>How to get a Google AI key</summary>
+          <ol>
+            <li>Open <b>aistudio.google.com</b> and sign in with your Google account.</li>
+            <li>Tap <b>Get API key</b>, then <b>Create API key</b>.</li>
+            <li>Tap <b>Set up billing</b> for the key and add a payment card (image AI is paid: about ₹3.5–₹11 per photo).</li>
+            <li>Copy the key, come back here, paste it above and tap <b>Save and check key</b>.</li>
+          </ol>
+          <p>Photos you send to the AI are processed by Google. Use it only with the customer's permission.</p>
+        </details>
+      </div>
       <button class="btn ghost" id="btnEditShop">Edit shop and theme</button>
       <button class="btn ghost" id="btnClearLooks">Delete all saved looks</button>
       <button class="btn ghost danger" id="btnReset">Sign out and reset app</button>
@@ -247,6 +275,7 @@
 
 <script src="mp/selfie_segmentation.js"></script>
 <script src="render.js"></script>
+<script src="ai.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

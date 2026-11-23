@@ -148,3 +148,10 @@ input[type=tel],input:not([type]),textarea{width:100%;font:16px var(--sans);padd
 .toast.show{transform:translateX(-50%) translateY(0)}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;z-index:60;padding:20px}
 .modal-card{background:var(--card);border-radius:18px;padding:20px;max-width:380px;width:100%}
+
+.btn.cam{display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer}
+.lbl{display:block;font-size:14px;font-weight:600;margin:4px 0 6px}
+.guide{margin-top:14px;font-size:14.5px}.guide summary{cursor:pointer;color:var(--p);font-weight:600;min-height:44px;display:flex;align-items:center}
+.guide ol{padding-left:20px;margin:6px 0}.guide li{margin:4px 0}
+#modeSeg{margin-top:0}
+.ai-badge{display:inline-block;background:var(--gold);color:#3a2205;border-radius:10px;padding:1px 8px;font-size:12px;font-weight:700;margin-left:6px}

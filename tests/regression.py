@@ -29,7 +29,8 @@ with sync_playwright() as p:
     ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, accept_downloads=True)
     pg = ctx.new_page()
     pg.on('pageerror', lambda e: errors.append('pageerror: ' + str(e)))
-    pg.on('console', lambda m: errors.append('console: ' + m.text) if m.type == 'error' else None)
+    pg.on('console', lambda m: errors.append('console: ' + m.text) if m.type == 'error' and 'Failed to load resource' not in m.text else None)
+    pg.on('response', lambda r: errors.append(f'http {r.status}: {r.url}') if r.status >= 400 and 'generativelanguage.googleapis.com' not in r.url else None)
     pg.goto(f'http://127.0.0.1:{PORT}/index.html'); pg.wait_for_load_state('networkidle')
     act = lambda: pg.evaluate("document.querySelector('.screen.active').id")
     shot = lambda n: pg.screenshot(path=os.path.join(OUT, n + '.png'), full_page=True)
@@ -180,6 +181,102 @@ with sync_playwright() as p:
     check('individual: no shop header on photo', True)
     d, n = trial('male', photo='cust_male_plain.jpg', outfit='kurta', bg='studio', tag='individual_kurta')
     check('individual try-on', d == [900, 1200])
+
+
+    # ---------- Real AI draping (Google Gemini) with simulated API answers ----------
+    import base64 as _b, re as _re
+    AIIMG = _b.b64encode(open(fx('ai_result.jpg'), 'rb').read()).decode()
+    calls = []
+    mode = {'v': 'ok'}
+    def gem(route):
+        req = route.request; url = req.url; body = req.post_data or ''
+        calls.append((req.method, url, body))
+        hdr = {'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'content-type': 'application/json'}
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=hdr, body='')
+        if req.headers.get('x-goog-api-key') != 'AIzaTESTKEY0123456789abcdefghijklmnopq':
+            return route.fulfill(status=400, headers=hdr, body=json.dumps({'error': {'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT'}}))
+        if '/models?' in url: return route.fulfill(status=200, headers=hdr, body=json.dumps({'models': [{'name': 'models/gemini-2.5-flash-image'}]}))
+        m = mode['v']
+        if m == 'billing': return route.fulfill(status=403, headers=hdr, body=json.dumps({'error': {'message': 'Billing required', 'status': 'PERMISSION_DENIED'}}))
+        if m == 'safety': return route.fulfill(status=200, headers=hdr, body=json.dumps({'promptFeedback': {'blockReason': 'SAFETY'}}))
+        if m == 'fallback':
+            if ':generateContent' in url: return route.fulfill(status=404, headers=hdr, body=json.dumps({'error': {'message': 'model not found', 'status': 'NOT_FOUND'}}))
+            return route.fulfill(status=200, headers=hdr, body=json.dumps({'steps': [{'type': 'model_output', 'content': [{'type': 'image', 'mime_type': 'image/jpeg', 'data': AIIMG}]}]}))
+        if m == 'second_model' and 'gemini-2.5-flash-image:' in url:
+            return route.fulfill(status=404, headers=hdr, body=json.dumps({'error': {'message': 'not found', 'status': 'NOT_FOUND'}}))
+        return route.fulfill(status=200, headers=hdr, body=json.dumps({'candidates': [{'content': {'parts': [{'text': 'Here is the photo'}, {'inlineData': {'mimeType': 'image/jpeg', 'data': AIIMG}}]}, 'finishReason': 'STOP'}]}))
+    pg.route('https://generativelanguage.googleapis.com/**', gem)
+
+    def to_bg(gender, photo=None, model=None, outfit=None, fabric=None, cam=False):
+        if act() == 's-result': pg.click('#btnEdit')
+        if act() == 's-bg': pg.click('#s-bg [data-back]')
+        if act() == 's-colors': pg.click('#s-colors [data-back]')
+        if act() == 's-outfit': pg.click('#s-outfit [data-back]')
+        if act() == 's-home': pg.click('#btnNewTrial')
+        pg.evaluate("ATR.temp().src=null")
+        pg.click('#gMale' if gender == 'male' else '#gFemale')
+        if photo: pg.set_input_files('#photoCam' if cam else '#photoFile', fx(photo)); pg.wait_for_selector('#photoPrev:not(.hidden)')
+        if model is not None: pg.click(f'.model[data-i="{model}"]')
+        pg.click('#btnCustNext')
+        if outfit: pg.click(f'#outfits .chip[data-o={outfit}]')
+        if fabric: pg.set_input_files('#garCam' if cam else '#garFile', fx(fabric)); pg.wait_for_selector('#garPrev:not(.hidden)')
+        pg.click('#btnOutfitNext'); pg.click('#btnColorsNext')
+
+    check('live camera button asks for the camera', pg.get_attribute('#photoCam', 'capture') == 'environment' and pg.get_attribute('#garCam', 'capture') == 'environment')
+    to_bg('female', photo='cust_female_plain.jpg', outfit='saree')
+    check('without a key, Quick preview is the default', pg.evaluate("ATR.temp().mode") == 'quick')
+    pg.click('#modeAI'); check('AI mode without key points to Settings', 'Google AI key' in pg.inner_text('#modeNote'))
+    pg.click('#btnGenerate'); check('AI without key does not start', act() == 's-bg')
+    pg.click('#goAiSetup'); check('opens Settings', act() == 's-settings')
+    pg.fill('#aiKey', 'hello'); pg.click('#btnAiSave'); check('rejects text that is not a key', 'does not look like' in pg.inner_text('#aiErr'))
+    pg.fill('#aiKey', 'AIzaWRONGKEY0123456789abcdefghijklmnopq'); pg.click('#btnAiSave'); pg.wait_for_function("document.getElementById('aiErr').textContent.length>0")
+    check('wrong key reported by Google is refused', 'not valid' in pg.inner_text('#aiErr'))
+    pg.fill('#aiKey', ' AIzaTESTKEY0123456789abcdefghijklmnopq '); pg.click('#btnAiSave'); pg.wait_for_function("ATR.state().aiKey")
+    check('valid key saved and shown as ready', 'Ready' in pg.inner_text('#aiStatus') and pg.input_value('#aiKey') == '')
+    pg.click('.chip[data-q=better]'); check('quality choice saved', pg.evaluate("ATR.state().aiQuality") == 'better'); pg.click('.chip[data-q=standard]')
+    pg.click('#s-settings [data-back]'); check('back to showroom step', act() == 's-bg')
+    pg.click('#modeAI'); shot('ai_01_mode')
+
+    def run_ai(tag):
+        calls.clear(); pg.click('#btnGenerate')
+        pg.wait_for_function("!document.getElementById('resultWrap').classList.contains('hidden') || document.querySelector('.screen.active').id==='s-bg'", timeout=30000)
+        ok = act() == 's-result'
+        dims = pg.evaluate("(async()=>{const i=document.getElementById('resultImg');if(!i.src)return null;await i.decode();return [i.naturalWidth,i.naturalHeight]})()") if ok else None
+        shot('ai_' + tag); return ok, dims
+
+    ok, d = run_ai('saree_photo_colours')
+    posts = [c for c in calls if c[0] == 'POST']
+    b0 = json.loads(posts[0][2]) if posts else {}
+    parts = b0.get('contents', [{}])[0].get('parts', [])
+    prompt = parts[0].get('text', '') if parts else ''
+    check('AI saree on customer photo -> branded 900x1200 result', ok and d == [900, 1200], d)
+    check('request sends the customer photo', sum(1 for x in parts if 'inline_data' in x) == 1)
+    check('prompt asks to keep the same face and drape a Nivi saree', 'same real person' in prompt and 'Nivi' in prompt and 'maroon silk' in prompt.lower())
+    check('uses Gemini 2.5 Flash Image for Standard', 'gemini-2.5-flash-image:generateContent' in posts[0][1])
+    check('"Try again" shown, neckline slider hidden for AI', pg.is_visible('#btnAgain') and not pg.is_visible('#neckAdj'))
+
+    to_bg('female', photo='cust_female_plain.jpg', outfit='saree', fabric='saree_red_butti.jpg', cam=True)
+    ok, d = run_ai('saree_live_photo_fabric')
+    b0 = json.loads([c for c in calls if c[0] == 'POST'][0][2]); parts = b0['contents'][0]['parts']; prompt = parts[0]['text']
+    check('live photo + saree photo -> AI result', ok and d == [900, 1200], d)
+    check('sends both photos (customer + saree)', sum(1 for x in parts if 'inline_data' in x) == 2)
+    check('prompt removes mannequin/hands/background from saree photo', 'mannequin' in prompt and 'hands' in prompt and 'EXACTLY the garment' in prompt)
+    pg.click('#btnAgain'); pg.wait_for_selector('#resultWrap:not(.hidden)', timeout=30000); check('Try again makes a new AI photo', len([c for c in calls if c[0] == 'POST']) >= 2)
+
+    mode['v'] = 'second_model'; to_bg('male', photo='cust_male_plain.jpg', outfit='suit')
+    ok, d = run_ai('suit_second_model'); check('falls back to next model if one is unavailable', ok and any('gemini-3.1-flash-image:generateContent' in c[1] for c in calls))
+    mode['v'] = 'fallback'; to_bg('male', photo='cust_male_plain.jpg', outfit='sherwani')
+    ok, d = run_ai('sherwani_new_api'); check('works with the newer Interactions API format', ok and d == [900, 1200] and any('/interactions' in c[1] for c in calls))
+    mode['v'] = 'ok'; to_bg('female', model=1, outfit='lehenga')
+    ok, d = run_ai('ai_model_lehenga'); b0 = json.loads([c for c in calls if c[0] == 'POST'][0][2])
+    check('AI model (no customer photo) -> realistic model prompt', ok and 'photorealistic full-length fashion catalogue photo' in b0['contents'][0]['parts'][0]['text'])
+    for m, word, tag in [('billing', 'billing', 'err_billing'), ('safety', 'declined', 'err_safety')]:
+        mode['v'] = m; to_bg('female', photo='cust_female_plain.jpg', outfit='saree'); ok, d = run_ai(tag)
+        check(f'clear message on {m} error, back on showroom step', (not ok) and act() == 's-bg' and word in pg.inner_text('#modeNote'))
+    pg.click('#useQuick'); check('one tap to switch to Quick preview after an error', pg.evaluate("ATR.temp().mode") == 'quick')
+    mode['v'] = 'ok'; pg.click('#btnGenerate'); pg.wait_for_selector('#resultWrap:not(.hidden)', timeout=30000); check('Quick preview still works', pg.is_visible('#neckAdj'))
+    pg.click('#btnSettings') if act() == 's-home' else None
+    pg.evaluate("ATR.back()"); pg.evaluate("ATR.back()")
 
     # narrow phone layout: nothing wider than the screen
     pg.set_viewport_size({'width': 360, 'height': 740})

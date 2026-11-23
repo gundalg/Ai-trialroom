@@ -144,13 +144,14 @@
       b.onclick = () => { T.src = { model: { gender: T.gender, skin: TR.SKINS[i] } }; T.srcKey = 'm' + T.gender + i; $('photoPrev').classList.add('hidden'); $('photoHint').classList.remove('hidden'); drawModels(); };
     });
   }
-  $('photoFile').onchange = async e => {
+  const onPhoto = async e => {
     try { const d = await readFile(e.target.files[0]); const ds = await downscale(d, 1600, 0.92); const img = await loadImg(ds.url);
       if (img.width < 200 || img.height < 200) throw new Error('This photo is too small. Please use a clearer photo.');
       T.src = { img }; T.srcKey = 'p' + Date.now(); $('photoPrev').src = ds.url; $('photoPrev').classList.remove('hidden'); $('photoHint').classList.add('hidden'); drawModels(); $('custErr').textContent = '';
     } catch (err) { $('custErr').textContent = err.message; }
     e.target.value = '';
   };
+  $('photoFile').onchange = onPhoto; $('photoCam').onchange = onPhoto;
   $('btnCustNext').onclick = () => { if (!T.src) { $('custErr').textContent = 'Upload a photo or choose an AI model.'; return; } go('outfit'); };
 
   /* ---------- outfit ---------- */
@@ -165,10 +166,11 @@
     if (od.photo) { $('garmentLbl').textContent = od.photo + ' (optional)'; $('garHint').innerHTML = `<b>Upload ${od.photo.toLowerCase()}</b><br>Its pattern is used on the look`; }
     $('garPrev').classList.toggle('hidden', !T.garImg); $('garHint').classList.toggle('hidden', !!T.garImg); $('garClear').classList.toggle('hidden', !T.garImg); if (T.garImg) $('garPrev').src = T.garImg.src;
   };
-  $('garFile').onchange = async e => {
+  const onGarment = async e => {
     try { const d = await readFile(e.target.files[0]); const ds = await downscale(d, 1200, 0.9); T.garImg = await loadImg(ds.url); T.fabric = TR.photoTile(T.garImg); T.fabricAvg = TR.avgColor(T.fabric); enter.outfit(); toast('Fabric added'); }
     catch (err) { toast(err.message); } e.target.value = '';
   };
+  $('garFile').onchange = onGarment; $('garCam').onchange = onGarment;
   $('garClear').onclick = () => { T.garImg = null; T.fabric = null; enter.outfit(); };
   $('btnOutfitNext').onclick = () => go('colors');
 
@@ -190,7 +192,20 @@
   $('btnColorsNext').onclick = () => go('bg');
 
   /* ---------- background ---------- */
+  const aiReady = () => !!(S.aiKey && S.aiKey.length > 20);
+  function setMode(m) {
+    T.mode = m; $('modeAI').classList.toggle('on', m === 'ai'); $('modeQuick').classList.toggle('on', m === 'quick');
+    const q = AI.QUALITY[S.aiQuality || 'standard'];
+    $('modeNote').innerHTML = m === 'ai'
+      ? (aiReady() ? `Google Gemini drapes the outfit on the real photo (${q.name}, ${q.price}). Takes 10–40 seconds and needs internet.` : 'Real AI needs your Google AI key. <button class="link" id="goAiSetup">Set it up in Settings</button>')
+      : 'Instant on-phone preview. Free and works offline, but less realistic.';
+    const g = $('goAiSetup'); if (g) g.onclick = () => go('settings');
+    $('btnGenerate').textContent = m === 'ai' ? 'Create real AI photo' : 'Create my look';
+  }
+  $('modeAI').onclick = () => setMode('ai'); $('modeQuick').onclick = () => setMode('quick');
   enter.bg = () => {
+    if (!T.mode) T.mode = aiReady() ? 'ai' : 'quick';
+    setMode(T.mode);
     const list = TR.BGS.slice().sort((a, b) => (b.g === T.gender) - (a.g === T.gender));
     if (!list.find(b => b.id === T.bg)) T.bg = list[0].id;
     $('bgs').innerHTML = list.map(b => `<button class="bgc ${b.id === T.bg ? 'on' : ''}" data-b="${b.id}"><canvas width="240" height="320"></canvas><b>${b.name}</b></button>`).join('');
@@ -218,8 +233,38 @@
     return list;
   }
   let busy = false;
-  async function generate() {
+  const b64 = (img, max) => { const s = Math.min(1, max / Math.max(img.width, img.height)); const c = TR.mk(Math.round(img.width * s), Math.round(img.height * s)); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.9).split(',')[1]; };
+  async function generateAI() {
     if (busy) return; busy = true;
+    $('busy').classList.remove('hidden'); $('resultWrap').classList.add('hidden'); $('busyTxt').textContent = 'Sending photos to Google AI…';
+    try {
+      ensureColors(); const od = outfitDef(), names = {};
+      for (const [k] of od.parts) names[k] = (T.colors[k] === 'none' ? 'no' : colorName(T.colors[k]).toLowerCase());
+      const images = [];
+      if (T.src.img) images.push({ mime: 'image/jpeg', data: b64(T.src.img, 1536) });
+      if (T.garImg) images.push({ mime: 'image/jpeg', data: b64(T.garImg, 1280) });
+      const model = T.src.model ? { skinIndex: TR.SKINS.indexOf(T.src.model.skin) } : null;
+      const prompt = AI.buildPrompt({ outfit: T.outfit, colorNames: names, hasFabric: !!T.garImg, bg: T.bg, model, gender: T.gender });
+      let n = 0; const tick = setInterval(() => { n++; $('busyTxt').textContent = ['Removing anything that is not the fabric…', 'Draping the outfit on the photo…', 'Matching light and folds…', 'Placing you in the showroom…', 'Almost ready…'][Math.min(4, Math.floor(n / 4))] + ` (${n * 2}s)`; }, 2000);
+      let out; try { out = await AI.generate(S.aiKey, S.aiQuality || 'standard', prompt, images); } finally { clearInterval(tick); }
+      const img = await loadImg(`data:${out.mime};base64,${out.data}`);
+      const st = { theme: S.theme, shop: S.role === 'owner' ? S.shop : null, label: labelFor(T.colors).replace('your fabric', 'your saree') + ' · Real AI' };
+      if (!T.garImg) st.label = st.label.replace(' · your saree', '');
+      const c = TR.brandImage(img, st, assets);
+      T.results = [{ url: c.toDataURL('image/jpeg', 0.92), label: st.label }]; T.lastAI = true;
+      const mk = new Date().toISOString().slice(0, 7); if (!S.aiCount || S.aiCount.m !== mk) S.aiCount = { m: mk, n: 0 }; S.aiCount.n++; save();
+      $('aiNote').textContent = '';
+      showResults(0);
+    } catch (err) {
+      console.warn('AI', err && err.message); $('busy').classList.add('hidden');
+      const msg = (err && err.message) || 'Something went wrong. Please try again.';
+      back(); setTimeout(() => { $('modeNote').innerHTML = '<span class="err">' + msg.replace(/</g, '&lt;') + '</span>' + ((err && /key|billing|quota/.test(err.code)) ? ' <button class="link" id="goAiSetup2">Open Settings</button>' : '') + ' <button class="link" id="useQuick">Use quick preview</button>'; const g = $('goAiSetup2'); if (g) g.onclick = () => go('settings'); $('useQuick').onclick = () => setMode('quick'); }, 50);
+      toast(msg, 5000);
+    } finally { busy = false; }
+  }
+  async function generate() {
+    if (T.mode === 'ai') return generateAI();
+    if (busy) return; busy = true; T.lastAI = false;
     $('busy').classList.remove('hidden'); $('resultWrap').classList.add('hidden'); $('busyTxt').textContent = 'Finding the person in the photo…';
     try {
       await new Promise(r => setTimeout(r, 30));
@@ -244,9 +289,12 @@
     $('resultImg').src = T.results[i].url; $('resultImg').dataset.i = i; $('saveNote').textContent = '';
     $('variants').innerHTML = T.results.length > 1 ? T.results.map((r, k) => `<img src="${r.url}" class="${k === i ? 'on' : ''}" data-k="${k}" alt="Look ${k + 1}">`).join('') : '';
     $('variants').querySelectorAll('img').forEach(im => im.onclick = () => showResults(+im.dataset.k, saved));
-    $('neckAdj').parentElement.classList.toggle('hidden', !!saved); $('btnEdit').classList.toggle('hidden', !!saved); $('btnFinish').classList.toggle('hidden', !!saved);
+    $('neckAdj').parentElement.classList.toggle('hidden', !!saved || !!T.lastAI); $('btnAgain').classList.toggle('hidden', !!saved || !T.lastAI); $('btnEdit').classList.toggle('hidden', !!saved); $('btnFinish').classList.toggle('hidden', !!saved);
   }
-  $('btnGenerate').onclick = () => { T.neckAdj = 0; $('neckAdj').value = 0; go('result'); generate(); };
+  $('btnGenerate').onclick = () => {
+    if (T.mode === 'ai' && !aiReady()) { toast('Add your Google AI key in Settings first, or choose Quick preview.'); return; }
+    T.neckAdj = 0; $('neckAdj').value = 0; go('result'); generate(); };
+  $('btnAgain').onclick = () => generate();
   $('neckAdj').onchange = e => { T.neckAdj = +e.target.value; generate(); };
   $('btnEdit').onclick = () => { stack.length = 0; stack.push('home', 'customer'); go('outfit', false); };
   $('btnSave').onclick = async () => {
@@ -266,7 +314,28 @@
   };
 
   /* ---------- settings ---------- */
-  enter.settings = () => { $('acctInfo').textContent = `${S.role === 'owner' ? 'Shop owner' : 'Individual'} · +91 ${S.phone || ''} · verified ${S.verifiedAt ? new Date(S.verifiedAt).toLocaleDateString() : ''}`; $('btnEditShop').classList.toggle('hidden', S.role !== 'owner'); };
+  function renderAI() {
+    const q = S.aiQuality || 'standard';
+    $('aiQuality').innerHTML = Object.entries(AI.QUALITY).map(([k, v]) => `<button class="chip ${k === q ? 'on' : ''}" data-q="${k}">${v.name} · ${v.price}</button>`).join('');
+    $('aiQuality').querySelectorAll('.chip').forEach(b => b.onclick = () => { S.aiQuality = b.dataset.q; save(); renderAI(); });
+    const mk = new Date().toISOString().slice(0, 7), n = S.aiCount && S.aiCount.m === mk ? S.aiCount.n : 0;
+    $('aiStatus').textContent = aiReady() ? `Ready ✓ · key ending …${S.aiKey.slice(-4)} · ${n} AI photo${n === 1 ? '' : 's'} this month` : 'Not set up yet. Real AI drapes the saree on the real photo.';
+    $('aiKey').value = ''; $('btnAiRemove').classList.toggle('hidden', !aiReady());
+  }
+  $('btnAiSave').onclick = async () => {
+    const k = $('aiKey').value.trim().replace(/\s+/g, '');
+    $('aiErr').textContent = '';
+    if (!k && aiReady()) { toast('Key already saved'); return; }
+    if (!/^[A-Za-z0-9_\-]{30,60}$/.test(k)) { $('aiErr').textContent = 'That does not look like a Google AI key. It usually starts with AIza and is about 39 characters.'; return; }
+    const b = $('btnAiSave'); b.disabled = true; b.textContent = 'Checking key…';
+    try {
+      const r = await AI.testKey(k);
+      if (!r.ok) { $('aiErr').textContent = r.message; return; }
+      S.aiKey = k; save(); T.mode = 'ai'; renderAI(); toast('Google AI key saved ✓');
+    } finally { b.disabled = false; b.textContent = 'Save and check key'; }
+  };
+  $('btnAiRemove').onclick = async () => { if (await ask('Remove the Google AI key from this phone?')) { delete S.aiKey; save(); T.mode = 'quick'; renderAI(); } };
+  enter.settings = () => { renderAI(); $('acctInfo').textContent = `${S.role === 'owner' ? 'Shop owner' : 'Individual'} · +91 ${S.phone || ''} · verified ${S.verifiedAt ? new Date(S.verifiedAt).toLocaleDateString() : ''}`; $('btnEditShop').classList.toggle('hidden', S.role !== 'owner'); };
   $('btnEditShop').onclick = () => go('shop');
   $('btnClearLooks').onclick = async () => { if (await ask('Delete all saved looks from this app?')) { S.looks = []; save(); toast('Looks deleted'); } };
   $('btnReset').onclick = async () => { if (await ask('Sign out and remove all app data from this phone?')) { try { localStorage.removeItem(KEY); } catch (e) {} S = {}; T.src = null; T.P = null; applyTheme(); stack.length = 0; go('splash', false); } };

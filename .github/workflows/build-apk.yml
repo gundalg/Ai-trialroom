@@ -1,0 +1,63 @@
+name: Test and build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  regression-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Install test tools
+        run: |
+          pip install playwright pillow
+          python -m playwright install --with-deps chromium
+          echo "CHROME=$(python -c 'from playwright.sync_api import sync_playwright as s; p=s().start(); print(p.chromium.executable_path); p.stop()')" >> $GITHUB_ENV
+      - name: Run regression suite (all outfits, sarees, suits, AI models, themes)
+        run: python tests/regression.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: regression-screenshots, path: tests/out }
+
+  build-apk:
+    needs: regression-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.9' }
+      - name: Prepare signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then echo "$KEYSTORE_B64" | base64 -d > $RUNNER_TEMP/release.jks; echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> $GITHUB_ENV; fi
+      - name: Build APK
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          gradle assembleRelease --no-daemon --stacktrace
+          mkdir -p dist && cp app/build/outputs/apk/release/app-release.apk dist/AI-TrialRoom-v1.0.${{ github.run_number }}.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: AI-TrialRoom-APK, path: dist/*.apk }
+      - name: Publish download (GitHub Release)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: AI TrialRoom v1.0.${{ github.run_number }}
+          body: |
+            **AI TrialRoom** — digital trial room. Developed by Gundal Business Pvt Ltd, Bengaluru (gundalg@gmail.com).
+            Download the APK below and open it on your Android phone (allow "Install unknown apps" when asked).
+          files: dist/*.apk
+          make_latest: true

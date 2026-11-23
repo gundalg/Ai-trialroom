@@ -1,0 +1,210 @@
+package com.gundal.aitrialroom;
+
+import android.Manifest;
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.media.MediaScannerConnection;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.util.Base64;
+import android.view.View;
+import android.view.Window;
+import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.Toast;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * AI TrialRoom — native shell. The app UI and the on-device AI run from bundled assets,
+ * served from a private https origin so WebAssembly and storage work offline.
+ * Customer photos never leave the phone.
+ */
+public class MainActivity extends Activity {
+    private static final String HOST = "appassets.androidplatform.net";
+    private static final int REQ_FILE = 41, REQ_PERM = 42;
+    private WebView web;
+    private ValueCallback<Uri[]> fileCallback;
+
+    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        Window w = getWindow();
+        w.setStatusBarColor(Color.parseColor("#6e0f2d"));
+        w.setNavigationBarColor(Color.parseColor("#2a1a16"));
+
+        web = new WebView(this);
+        web.setBackgroundColor(Color.parseColor("#fbf5ec"));
+        web.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        setContentView(web);
+
+        WebSettings s = web.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(true);
+        s.setMediaPlaybackRequiresUserGesture(true);
+        s.setTextZoom(100);
+
+        web.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
+                Uri u = req.getUrl();
+                if (!HOST.equals(u.getHost())) return null;
+                String path = u.getPath();
+                if (path == null || path.equals("/") || path.isEmpty()) path = "/index.html";
+                if (path.contains("..")) return notFound();
+                try {
+                    InputStream in = getAssets().open("www" + path);
+                    WebResourceResponse r = new WebResourceResponse(mime(path), mime(path).startsWith("text") || path.endsWith(".js") ? "utf-8" : null, in);
+                    Map<String, String> h = new HashMap<>();
+                    h.put("Cache-Control", "no-cache");
+                    h.put("Access-Control-Allow-Origin", "https://" + HOST);
+                    r.setResponseHeaders(h);
+                    return r;
+                } catch (Exception e) {
+                    return notFound();
+                }
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                Uri u = req.getUrl();
+                if (HOST.equals(u.getHost())) return false;
+                try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) { }
+                return true;
+            }
+        });
+
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
+                if (fileCallback != null) fileCallback.onReceiveValue(null);
+                fileCallback = cb;
+                Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
+                pick.addCategory(Intent.CATEGORY_OPENABLE);
+                pick.setType("image/*");
+                try {
+                    startActivityForResult(Intent.createChooser(pick, "Choose photo"), REQ_FILE);
+                } catch (Exception e) {
+                    fileCallback = null;
+                    Toast.makeText(MainActivity.this, "No photo app found", Toast.LENGTH_SHORT).show();
+                    return false;
+                }
+                return true;
+            }
+        });
+
+        web.addJavascriptInterface(new Bridge(), "AndroidBridge");
+        if (savedInstanceState != null) web.restoreState(savedInstanceState);
+        else web.loadUrl("https://" + HOST + "/index.html");
+    }
+
+    private static WebResourceResponse notFound() {
+        WebResourceResponse r = new WebResourceResponse("text/plain", "utf-8", null);
+        r.setStatusCodeAndReasonPhrase(404, "Not Found");
+        return r;
+    }
+
+    private static String mime(String p) {
+        p = p.toLowerCase();
+        if (p.endsWith(".html")) return "text/html";
+        if (p.endsWith(".js")) return "text/javascript";
+        if (p.endsWith(".css")) return "text/css";
+        if (p.endsWith(".wasm")) return "application/wasm";
+        if (p.endsWith(".png")) return "image/png";
+        if (p.endsWith(".jpg") || p.endsWith(".jpeg")) return "image/jpeg";
+        if (p.endsWith(".svg")) return "image/svg+xml";
+        if (p.endsWith(".json")) return "application/json";
+        return "application/octet-stream";
+    }
+
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == REQ_FILE && fileCallback != null) {
+            Uri[] out = null;
+            if (res == RESULT_OK && data != null && data.getData() != null) out = new Uri[]{data.getData()};
+            fileCallback.onReceiveValue(out);
+            fileCallback = null;
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        web.evaluateJavascript("(window.ATR && ATR.back()) ? 'y' : 'n'", v -> {
+            if (v == null || !v.contains("y")) MainActivity.super.onBackPressed();
+        });
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        web.saveState(out);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (web != null) { web.destroy(); web = null; }
+        super.onDestroy();
+    }
+
+    /** Exposed to the web app as window.AndroidBridge */
+    private class Bridge {
+        @JavascriptInterface
+        public String saveImage(String base64, String name) {
+            try {
+                byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+                if (name == null || !name.matches("[A-Za-z0-9._-]{1,80}")) name = "AI-TrialRoom-" + System.currentTimeMillis() + ".jpg";
+                if (Build.VERSION.SDK_INT >= 29) {
+                    ContentResolver cr = getContentResolver();
+                    ContentValues cv = new ContentValues();
+                    cv.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+                    cv.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                    cv.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/AI TrialRoom");
+                    cv.put(MediaStore.Images.Media.IS_PENDING, 1);
+                    Uri uri = cr.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
+                    if (uri == null) return "error";
+                    try (OutputStream os = cr.openOutputStream(uri)) { if (os == null) return "error"; os.write(bytes); }
+                    cv.clear();
+                    cv.put(MediaStore.Images.Media.IS_PENDING, 0);
+                    cr.update(uri, cv, null, null);
+                } else {
+                    if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                        runOnUiThread(() -> requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_PERM));
+                        return "error";
+                    }
+                    File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "AI TrialRoom");
+                    if (!dir.exists() && !dir.mkdirs()) return "error";
+                    File f = new File(dir, name);
+                    try (FileOutputStream fo = new FileOutputStream(f)) { fo.write(bytes); }
+                    MediaScannerConnection.scanFile(MainActivity.this, new String[]{f.getAbsolutePath()}, new String[]{"image/jpeg"}, null);
+                }
+                return "ok";
+            } catch (Exception e) {
+                return "error";
+            }
+        }
+    }
+}

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#6e0f2d">
+<title>AI TrialRoom</title>
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body data-theme="maroon">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gGold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7dc8a"/><stop offset=".5" stop-color="#d4a017"/><stop offset="1" stop-color="#a87a0c"/>
+    </linearGradient>
+    <symbol id="glogo" viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="47" fill="#6e0f2d" stroke="url(#gGold)" stroke-width="5"/>
+      <path d="M68 36 A22 22 0 1 0 72 56 L52 56" fill="none" stroke="url(#gGold)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div id="app">
+
+  <!-- Splash -->
+  <section class="screen active" id="s-splash">
+    <div class="splash">
+      <svg class="logo-xl"><use href="#glogo"/></svg>
+      <h1 class="brand">AI TrialRoom</h1>
+      <p class="tag">Try it on before you buy it</p>
+      <button class="btn gold" id="btnStart">Get started</button>
+      <p class="maker"><img src="gundal.png" class="gundal" alt="">Developed by Gundal Business Pvt Ltd, Bengaluru</p>
+    </div>
+  </section>
+
+  <!-- Role -->
+  <section class="screen" id="s-role">
+    <header class="top"><svg class="logo-s"><use href="#glogo"/></svg><span>AI TrialRoom</span></header>
+    <div class="pad">
+      <h2>Who is using AI TrialRoom?</h2>
+      <p class="sub">Choose one to continue.</p>
+      <button class="card choice" data-role="owner" id="roleOwner">
+        <span class="ic">🏬</span>
+        <span><b>Shop owner</b><small>Show customers how sarees, suits and dresses look on them, with your shop's brand on every photo.</small></span>
+      </button>
+      <button class="card choice" data-role="individual" id="roleIndividual">
+        <span class="ic">🙋</span>
+        <span><b>Individual</b><small>Try outfits on your own photo before you shop.</small></span>
+      </button>
+    </div>
+  </section>
+
+  <!-- Phone -->
+  <section class="screen" id="s-phone">
+    <header class="top"><button class="back" data-back>‹</button><span>Verify your phone</span></header>
+    <div class="pad">
+      <h2>Your mobile number</h2>
+      <p class="sub">We send a 6-digit code to confirm that it's you.</p>
+      <label class="field"><span>Mobile number</span>
+        <div class="phone-row"><span class="cc">+91</span><input id="phone" type="tel" inputmode="numeric" placeholder="98765 43210" autocomplete="tel"></div>
+      </label>
+      <p class="err" id="phoneErr"></p>
+      <button class="btn" id="btnSendOtp">Send code</button>
+      <div id="otpBox" class="hidden">
+        <label class="field"><span>Enter 6-digit code</span>
+          <input id="otp" type="tel" inputmode="numeric" placeholder="••••••" autocomplete="one-time-code"></label>
+        <p class="note" id="otpNote"></p>
+        <p class="err" id="otpErr"></p>
+        <button class="btn" id="btnVerify">Verify</button>
+        <button class="link" id="btnResend">Resend code</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Consent -->
+  <section class="screen" id="s-consent">
+    <header class="top"><button class="back" data-back>‹</button><span>Photo agreement</span></header>
+    <div class="pad">
+      <h2>Photo use agreement</h2>
+      <div class="card agree" id="agreeText"></div>
+      <label class="check"><input type="checkbox" class="cbx"><span id="c1"></span></label>
+      <label class="check"><input type="checkbox" class="cbx"><span id="c2"></span></label>
+      <label class="check"><input type="checkbox" class="cbx"><span id="c3"></span></label>
+      <p class="err" id="consentErr"></p>
+      <button class="btn" id="btnAgree">I agree</button>
+    </div>
+  </section>
+
+  <!-- Shop setup -->
+  <section class="screen" id="s-shop">
+    <header class="top"><button class="back" data-back>‹</button><span>Your shop</span></header>
+    <div class="pad">
+      <h2>Set up your shop</h2>
+      <p class="sub">Your logo and address appear on every try-on photo.</p>
+      <div class="logo-up">
+        <label class="logo-drop" id="logoDrop">
+          <img id="logoPrev" alt="" class="hidden">
+          <span id="logoHint">＋<br>Shop logo</span>
+          <input type="file" accept="image/*" id="logoFile" hidden>
+        </label>
+        <div class="grow">
+          <label class="field"><span>Shop name</span><input id="shopName" maxlength="40" placeholder="Sri Lakshmi Silks"></label>
+        </div>
+      </div>
+      <label class="field"><span>Shop address</span><textarea id="shopAddr" rows="3" maxlength="160" placeholder="12, Chickpet Main Road, Bengaluru 560053"></textarea></label>
+      <h3>Choose your theme</h3>
+      <div class="themes" id="themes">
+        <button class="theme-card" data-t="maroon"><i style="background:linear-gradient(135deg,#6e0f2d,#a3183f)"></i><i style="background:#d4a017"></i><b>Royal Maroon</b></button>
+        <button class="theme-card" data-t="peacock"><i style="background:linear-gradient(135deg,#0b4a40,#127a68)"></i><i style="background:#e0b44c"></i><b>Peacock Emerald</b></button>
+        <button class="theme-card" data-t="rose"><i style="background:linear-gradient(135deg,#9c2f52,#d0607f)"></i><i style="background:#f3e3d3"></i><b>Rose Ivory</b></button>
+      </div>
+      <p class="err" id="shopErr"></p>
+      <button class="btn" id="btnShopSave">Save and continue</button>
+    </div>
+  </section>
+
+  <!-- Home -->
+  <section class="screen" id="s-home">
+    <header class="top home-top">
+      <img id="homeLogo" class="shoplogo hidden" alt="">
+      <svg class="logo-s" id="homeG"><use href="#glogo"/></svg>
+      <span id="homeTitle">AI TrialRoom</span>
+      <button class="icon" id="btnSettings" aria-label="Settings">⚙</button>
+    </header>
+    <div class="pad">
+      <div class="hero">
+        <p class="hello" id="hello">Welcome</p>
+        <h2>Your personal trial room</h2>
+        <p class="sub">Upload a photo, pick an outfit and colours, and see the look in a showroom.</p>
+        <button class="btn gold" id="btnNewTrial">Start a new trial</button>
+      </div>
+      <h3>Recent looks</h3>
+      <div class="gallery" id="recent"><p class="empty">Your looks appear here after your first trial.</p></div>
+    </div>
+    <footer class="brandfoot"><img src="gundal.png" class="gundal" alt="Gundal logo"><span>Developed by <b>Gundal Business Pvt Ltd</b>, Bengaluru<br>gundalg@gmail.com</span></footer>
+  </section>
+
+  <!-- Customer -->
+  <section class="screen" id="s-customer">
+    <header class="top"><button class="back" data-back>‹</button><span>Step 1 of 4 · Photo</span></header>
+    <div class="pad">
+      <h2 id="custTitle">Customer photo</h2>
+      <div class="seg" id="genderSeg">
+        <button data-g="female" class="on" id="gFemale">Female</button>
+        <button data-g="male" id="gMale">Male</button>
+      </div>
+      <label class="photo-drop" id="photoDrop">
+        <img id="photoPrev" alt="" class="hidden">
+        <span id="photoHint"><b>Upload full-length photo</b><br>Stand straight, facing the camera</span>
+        <input type="file" accept="image/*" id="photoFile" hidden>
+      </label>
+      <p class="sub center">No photo? Choose an AI model:</p>
+      <div class="models" id="models"></div>
+      <p class="err" id="custErr"></p>
+      <button class="btn" id="btnCustNext">Next</button>
+    </div>
+  </section>
+
+  <!-- Outfit -->
+  <section class="screen" id="s-outfit">
+    <header class="top"><button class="back" data-back>‹</button><span>Step 2 of 4 · Outfit</span></header>
+    <div class="pad">
+      <h2>Choose the outfit</h2>
+      <div class="chips" id="outfits"></div>
+      <div id="codeBox" class="hidden">
+        <h3>Official dress code</h3>
+        <div class="chips" id="codes"></div>
+      </div>
+      <div id="garmentBox">
+        <h3 id="garmentLbl">Saree photo (optional)</h3>
+        <label class="photo-drop small" id="garDrop">
+          <img id="garPrev" alt="" class="hidden">
+          <span id="garHint"><b>Upload saree photo</b><br>Its pattern is used on the look</span>
+          <input type="file" accept="image/*" id="garFile" hidden>
+        </label>
+        <button class="link hidden" id="garClear">Remove photo, use colours instead</button>
+      </div>
+      <button class="btn" id="btnOutfitNext">Next</button>
+    </div>
+  </section>
+
+  <!-- Colours -->
+  <section class="screen" id="s-colors">
+    <header class="top"><button class="back" data-back>‹</button><span>Step 3 of 4 · Colours</span></header>
+    <div class="pad">
+      <h2>Pick colours</h2>
+      <p class="sub">Tap a part, then tap a colour. Each square is 1 inch.</p>
+      <div class="parts" id="parts"></div>
+      <div class="swatches" id="swatches"></div>
+      <label class="check"><input type="checkbox" id="multi"><span>Also make looks in 3 more colours for comparison</span></label>
+      <button class="btn" id="btnColorsNext">Next</button>
+    </div>
+  </section>
+
+  <!-- Background -->
+  <section class="screen" id="s-bg">
+    <header class="top"><button class="back" data-back>‹</button><span>Step 4 of 4 · Showroom</span></header>
+    <div class="pad">
+      <h2>Choose a showroom</h2>
+      <div class="bgs" id="bgs"></div>
+      <button class="btn gold" id="btnGenerate">Create my look</button>
+    </div>
+  </section>
+
+  <!-- Result -->
+  <section class="screen" id="s-result">
+    <header class="top"><button class="back" data-back>‹</button><span>Your look</span></header>
+    <div class="pad">
+      <div class="busy hidden" id="busy"><div class="spin"></div><p id="busyTxt">Creating your look…</p></div>
+      <div id="resultWrap" class="hidden">
+        <img id="resultImg" class="result" alt="Try-on result">
+        <div class="thumbs" id="variants"></div>
+        <label class="field fit"><span>Fit: move neckline <small id="aiNote"></small></span>
+          <input type="range" id="neckAdj" min="-6" max="6" step="1" value="0"></label>
+        <div class="row">
+          <button class="btn" id="btnSave">Save to gallery</button>
+          <button class="btn ghost" id="btnEdit">Change outfit</button>
+        </div>
+        <button class="btn ghost" id="btnFinish">Finish and delete customer photo</button>
+        <p class="note" id="saveNote"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section class="screen" id="s-settings">
+    <header class="top"><button class="back" data-back>‹</button><span>Settings</span></header>
+    <div class="pad">
+      <div class="card"><b>Account</b><p class="sub" id="acctInfo"></p></div>
+      <button class="btn ghost" id="btnEditShop">Edit shop and theme</button>
+      <button class="btn ghost" id="btnClearLooks">Delete all saved looks</button>
+      <button class="btn ghost danger" id="btnReset">Sign out and reset app</button>
+      <div class="about">
+        <p><b>AI TrialRoom</b> v1.0</p>
+        <img src="gundal.png" class="gundal-l" alt="Gundal logo">
+        <p>Developed by <b>Gundal Business Pvt Ltd</b>, Bengaluru</p>
+        <p>gundalg@gmail.com</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+  <div class="modal hidden" id="modal"><div class="modal-card"><p id="modalTxt"></p><div class="row"><button class="btn ghost" id="modalNo">Cancel</button><button class="btn danger" id="modalYes">Yes</button></div></div></div>
+</div>
+
+<script src="mp/selfie_segmentation.js"></script>
+<script src="render.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

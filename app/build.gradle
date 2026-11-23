@@ -8,8 +8,10 @@ android {
         applicationId 'com.gundal.aitrialroom'
         minSdk 24
         targetSdk 34
-        versionCode (System.getenv('VERSION_CODE') ?: '1') as int
-        versionName "1.0." + (System.getenv('VERSION_CODE') ?: '0')
+        def vc = System.getenv('VERSION_CODE')
+        if (vc == null || vc.isEmpty()) vc = '1'
+        versionCode = Integer.parseInt(vc)
+        versionName = '1.0.' + vc
     }
 
     signingConfigs {

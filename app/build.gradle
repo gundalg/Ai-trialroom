@@ -15,7 +15,7 @@ android {
     signingConfigs {
         release {
             def ks = System.getenv('KEYSTORE_FILE')
-            if (ks && file(ks).exists()) {
+            if (ks != null && !ks.isEmpty() && file(ks).exists()) {
                 storeFile file(ks)
                 storePassword System.getenv('KEYSTORE_PASSWORD')
                 keyAlias System.getenv('KEY_ALIAS')
@@ -27,8 +27,9 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            def ks = System.getenv('KEYSTORE_FILE')
-            signingConfig (ks && file(ks).exists()) ? signingConfigs.release : signingConfigs.debug
+            def ksFile = System.getenv('KEYSTORE_FILE')
+            boolean hasKey = ksFile != null && !ksFile.isEmpty() && file(ksFile).exists()
+            signingConfig = hasKey ? signingConfigs.release : signingConfigs.debug
         }
     }
 

@@ -155,3 +155,5 @@ input[type=tel],input:not([type]),textarea{width:100%;font:16px var(--sans);padd
 .guide ol{padding-left:20px;margin:6px 0}.guide li{margin:4px 0}
 #modeSeg{margin-top:0}
 .ai-badge{display:inline-block;background:var(--gold);color:#3a2205;border-radius:10px;padding:1px 8px;font-size:12px;font-weight:700;margin-left:6px}
+.row.pick{margin-top:12px}.row.pick .btn{margin-top:0;font-size:15.5px;padding:0 8px;min-width:0}
+@media(max-width:360px){.row.pick{flex-direction:column}}

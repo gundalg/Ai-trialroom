@@ -226,6 +226,21 @@ with sync_playwright() as p:
         if fabric: pg.set_input_files('#garCam' if cam else '#garFile', fx(fabric)); pg.wait_for_selector('#garPrev:not(.hidden)')
         pg.click('#btnOutfitNext'); pg.click('#btnColorsNext')
 
+    def opens(sel):
+        with pg.expect_file_chooser(timeout=5000) as fc: pg.click(sel)
+        el = fc.value.element; return el.get_attribute('id'), el.get_attribute('capture')
+    for _ in range(8):
+        if act() == 's-home' or not pg.evaluate("ATR.back()"): break
+    pg.click('#btnNewTrial'); pg.click('#gFemale')
+    check('customer: "Choose from gallery" opens the gallery (no camera)', opens('#galBtn') == ('photoFile', None))
+    check('customer: "Take live photo" opens the camera', opens('#camBtn') == ('photoCam', 'environment'))
+    pg.set_input_files('#photoFile', fx('cust_female_plain.jpg')); pg.wait_for_selector('#photoPrev:not(.hidden)')
+    check('after choosing, button says "Change photo"', 'Change photo' in pg.inner_text('#galBtn'))
+    pg.click('#btnCustNext'); pg.click('#outfits .chip[data-o=saree]')
+    check('saree: "Choose from gallery" opens the gallery', opens('#garGalBtn') == ('garFile', None))
+    check('saree: "Take live photo" opens the camera', opens('#garCamBtn') == ('garCam', 'environment'))
+    check('both buttons visible side by side', pg.is_visible('#garGalBtn') and pg.is_visible('#garCamBtn'))
+    shot('pick_buttons_saree'); pg.click('#s-outfit [data-back]'); shot('pick_buttons_customer')
     check('live camera button asks for the camera', pg.get_attribute('#photoCam', 'capture') == 'environment' and pg.get_attribute('#garCam', 'capture') == 'environment')
     to_bg('female', photo='cust_female_plain.jpg', outfit='saree')
     check('without a key, Quick preview is the default', pg.evaluate("ATR.temp().mode") == 'quick')

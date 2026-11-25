@@ -119,17 +119,14 @@ public class MainActivity extends Activity {
             public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
                 fileCallback = cb;
-                Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
-                pick.addCategory(Intent.CATEGORY_OPENABLE);
-                pick.setType("image/*");
-                Intent camera = cameraIntent();
+                boolean wantCamera = p != null && p.isCaptureEnabled();
+                Intent camera = wantCamera ? cameraIntent() : null;
                 try {
-                    if (p != null && p.isCaptureEnabled() && camera != null) {
-                        startActivityForResult(camera, REQ_FILE);
+                    if (camera != null) {
+                        startActivityForResult(camera, REQ_FILE);          // "Take live photo" button
                     } else {
-                        Intent chooser = Intent.createChooser(pick, "Choose photo");
-                        if (camera != null) chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{camera});
-                        startActivityForResult(chooser, REQ_FILE);
+                        cameraFile = null; cameraUri = null;
+                        startActivityForResult(galleryIntent(), REQ_FILE);  // "Choose from gallery" button
                     }
                 } catch (Exception e) {
                     fileCallback = null;
@@ -143,6 +140,22 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
         else web.loadUrl("https://" + HOST + "/index.html");
+    }
+
+    /** Opens the phone's gallery / photo picker directly. */
+    private Intent galleryIntent() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            Intent pick = new Intent(MediaStore.ACTION_PICK_IMAGES);
+            pick.setType("image/*");
+            if (pick.resolveActivity(getPackageManager()) != null) return pick;
+        }
+        Intent g = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+        g.setType("image/*");
+        if (g.resolveActivity(getPackageManager()) != null) return g;
+        Intent c = new Intent(Intent.ACTION_GET_CONTENT);
+        c.addCategory(Intent.CATEGORY_OPENABLE);
+        c.setType("image/*");
+        return Intent.createChooser(c, "Choose photo");
     }
 
     /** Camera intent that writes the photo into the app's private cache (never the public gallery). */

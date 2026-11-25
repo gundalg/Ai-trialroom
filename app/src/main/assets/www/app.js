@@ -147,7 +147,7 @@
   const onPhoto = async e => {
     try { const d = await readFile(e.target.files[0]); const ds = await downscale(d, 1600, 0.92); const img = await loadImg(ds.url);
       if (img.width < 200 || img.height < 200) throw new Error('This photo is too small. Please use a clearer photo.');
-      T.src = { img }; T.srcKey = 'p' + Date.now(); $('photoPrev').src = ds.url; $('photoPrev').classList.remove('hidden'); $('photoHint').classList.add('hidden'); drawModels(); $('custErr').textContent = '';
+      T.src = { img }; T.srcKey = 'p' + Date.now(); $('galBtn').textContent = '🖼 Change photo'; $('photoPrev').src = ds.url; $('photoPrev').classList.remove('hidden'); $('photoHint').classList.add('hidden'); drawModels(); $('custErr').textContent = '';
     } catch (err) { $('custErr').textContent = err.message; }
     e.target.value = '';
   };
@@ -163,7 +163,8 @@
     $('codes').innerHTML = TR.CODES.map(c => `<button class="chip ${c.id === T.code ? 'on' : ''}" data-c="${c.id}">${c.name}</button>`).join('');
     $('codes').querySelectorAll('.chip').forEach(b => b.onclick = () => { const c = TR.CODES.find(x => x.id === b.dataset.c); T.code = c.id; T.outfit = c.outfit; T.colors = Object.assign({}, c.colors); T.fabric = null; T.garImg = null; enter.outfit(); });
     const od = outfitDef(); $('garmentBox').classList.toggle('hidden', !od.photo);
-    if (od.photo) { $('garmentLbl').textContent = od.photo + ' (optional)'; $('garHint').innerHTML = `<b>Upload ${od.photo.toLowerCase()}</b><br>Its pattern is used on the look`; }
+    if (od.photo) { $('garmentLbl').textContent = od.photo + ' (optional)'; $('garHint').innerHTML = `<b>${od.photo}</b><br>Use a button below`; }
+    $('garGalBtn').textContent = T.garImg ? '🖼 Change photo' : '🖼 From gallery';
     $('garPrev').classList.toggle('hidden', !T.garImg); $('garHint').classList.toggle('hidden', !!T.garImg); $('garClear').classList.toggle('hidden', !T.garImg); if (T.garImg) $('garPrev').src = T.garImg.src;
   };
   const onGarment = async e => {

@@ -148,10 +148,13 @@
       </div>
       <label class="photo-drop" id="photoDrop">
         <img id="photoPrev" alt="" class="hidden">
-        <span id="photoHint"><b>Choose photo from gallery</b><br>Full-length, standing straight, facing the camera</span>
+        <span id="photoHint"><b>Customer photo</b><br>Full-length, standing straight, facing the camera</span>
         <input type="file" accept="image/*" id="photoFile" hidden>
       </label>
-      <label class="btn cam" id="camBtn">📷 Take live photo<input type="file" accept="image/*" capture="environment" id="photoCam" hidden></label>
+      <div class="row pick">
+        <label class="btn ghost cam" id="galBtn" for="photoFile">🖼 From gallery</label>
+        <label class="btn cam" id="camBtn">📷 Live photo<input type="file" accept="image/*" capture="environment" id="photoCam" hidden></label>
+      </div>
       <p class="sub center">No photo? Choose an AI model:</p>
       <div class="models" id="models"></div>
       <p class="err" id="custErr"></p>
@@ -173,10 +176,13 @@
         <h3 id="garmentLbl">Saree photo (optional)</h3>
         <label class="photo-drop small" id="garDrop">
           <img id="garPrev" alt="" class="hidden">
-          <span id="garHint"><b>Upload saree photo</b><br>Its pattern is used on the look</span>
+          <span id="garHint"><b>Saree photo</b><br>Use a button below</span>
           <input type="file" accept="image/*" id="garFile" hidden>
         </label>
-        <label class="btn ghost cam" id="garCamBtn">📷 Take photo of the saree<input type="file" accept="image/*" capture="environment" id="garCam" hidden></label>
+        <div class="row pick">
+          <label class="btn ghost cam" id="garGalBtn" for="garFile">🖼 From gallery</label>
+          <label class="btn cam" id="garCamBtn">📷 Live photo<input type="file" accept="image/*" capture="environment" id="garCam" hidden></label>
+        </div>
         <p class="note" id="garNote">Any photo works: folded, on a mannequin or held in hand. The AI uses only the fabric.</p>
         <button class="link hidden" id="garClear">Remove photo, use colours instead</button>
       </div>

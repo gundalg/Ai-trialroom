@@ -7,7 +7,13 @@ import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.os.Debug;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+import android.view.WindowManager;
 import android.graphics.Color;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
@@ -30,7 +36,14 @@ import android.widget.Toast;
 
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.FileReader;
+import java.security.KeyStore;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -66,6 +79,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Security: refuse to run under a debugger or hooking framework; block screenshots by default
+        if (isTampered()) {
+            Toast.makeText(this, "AI TrialRoom can't run on this device for security reasons.", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+        WebView.setWebContentsDebuggingEnabled(false);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         Window w = getWindow();
         w.setStatusBarColor(Color.parseColor("#6e0f2d"));
         w.setNavigationBarColor(Color.parseColor("#2a1a16"));
@@ -182,6 +203,56 @@ public class MainActivity extends Activity {
         if (fs != null) for (File f : fs) { if (!f.delete()) f.deleteOnExit(); }
     }
 
+    /** Debugger attached to a release build, or a known hooking tool (Frida / Xposed) loaded into the app. */
+    private boolean isTampered() {
+        try {
+            boolean debuggable = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+            if (!debuggable && (Debug.isDebuggerConnected() || Debug.waitingForDebugger())) return true;
+        } catch (Exception ignored) { }
+        try { Class.forName("de.robv.android.xposed.XposedBridge"); return true; } catch (Throwable ignored) { }
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/self/maps"))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                String l = line.toLowerCase();
+                if (l.contains("frida") || l.contains("gum-js-loop") || l.contains("xposed") || l.contains("substrate")) return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
+    }
+
+    /* ---------- encrypted storage (Android Keystore, AES-256-GCM, key never leaves secure hardware) ---------- */
+    private static final String KS_ALIAS = "aitrialroom.secure";
+
+    private SecretKey secretKey() throws Exception {
+        KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+        ks.load(null);
+        if (ks.containsAlias(KS_ALIAS)) return ((KeyStore.SecretKeyEntry) ks.getEntry(KS_ALIAS, null)).getSecretKey();
+        KeyGenerator kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+        kg.init(new KeyGenParameterSpec.Builder(KS_ALIAS, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build());
+        return kg.generateKey();
+    }
+
+    private String encrypt(String plain) throws Exception {
+        Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+        c.init(Cipher.ENCRYPT_MODE, secretKey());
+        byte[] iv = c.getIV(), ct = c.doFinal(plain.getBytes(StandardCharsets.UTF_8));
+        return Base64.encodeToString(iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(ct, Base64.NO_WRAP);
+    }
+
+    private String decrypt(String stored) throws Exception {
+        String[] parts = stored.split(":");
+        if (parts.length != 2) return "";
+        Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+        c.init(Cipher.DECRYPT_MODE, secretKey(), new GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)));
+        return new String(c.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), StandardCharsets.UTF_8);
+    }
+
+    private SharedPreferences securePrefs() { return getSharedPreferences("secure", MODE_PRIVATE); }
+
     private static WebResourceResponse notFound() {
         WebResourceResponse r = new WebResourceResponse("text/plain", "utf-8", null);
         r.setStatusCodeAndReasonPhrase(404, "Not Found");
@@ -289,6 +360,35 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void clearCaptures() { MainActivity.this.clearCaptures(); }
+
+        @JavascriptInterface
+        public String secureGet(String name) {
+            try {
+                if (name == null || !name.matches("[A-Za-z0-9_]{1,40}")) return "";
+                String v = securePrefs().getString(name, null);
+                return v == null ? "" : decrypt(v);
+            } catch (Exception e) { return ""; }
+        }
+
+        @JavascriptInterface
+        public boolean secureSet(String name, String value) {
+            try {
+                if (name == null || !name.matches("[A-Za-z0-9_]{1,40}")) return false;
+                if (value == null || value.isEmpty()) securePrefs().edit().remove(name).apply();
+                else securePrefs().edit().putString(name, encrypt(value)).apply();
+                return true;
+            } catch (Exception e) { return false; }
+        }
+
+        @JavascriptInterface
+        public void setSecure(final boolean on) {
+            runOnUiThread(new Runnable() {
+                @Override public void run() {
+                    if (on) getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
+                    else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+                }
+            });
+        }
 
         @JavascriptInterface
         public String saveImage(String base64, String name) {

@@ -7,14 +7,14 @@ import functools, http.server, os, sys, threading, time, json
 from playwright.sync_api import sync_playwright
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-WWW = os.path.join(ROOT, '..', 'app', 'src', 'main', 'assets', 'www')
+WWW = os.environ.get('WWW') or os.path.join(ROOT, '..', 'app', 'src', 'main', 'assets', 'www')
 FX = os.path.join(ROOT, 'fixtures')
 OUT = os.path.join(ROOT, 'out'); os.makedirs(OUT, exist_ok=True)
 PORT = 8765
 
 class Q(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a): pass
-    extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map, '.wasm': 'application/wasm', '.js': 'text/javascript'}
+    extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map, '.wasm': 'application/wasm', '.js': 'text/javascript', '.bin': 'application/octet-stream'}
 srv = http.server.ThreadingHTTPServer(('127.0.0.1', PORT), functools.partial(Q, directory=WWW))
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 
@@ -31,7 +31,15 @@ with sync_playwright() as p:
     pg.on('pageerror', lambda e: errors.append('pageerror: ' + str(e)))
     pg.on('console', lambda m: errors.append('console: ' + m.text) if m.type == 'error' and 'Failed to load resource' not in m.text else None)
     pg.on('response', lambda r: errors.append(f'http {r.status}: {r.url}') if r.status >= 400 and 'generativelanguage.googleapis.com' not in r.url else None)
+    pg.add_init_script("window.addEventListener('DOMContentLoaded',()=>{ try { GENDER.disabled = true; } catch (e) {} });")
     pg.goto(f'http://127.0.0.1:{PORT}/index.html'); pg.wait_for_load_state('networkidle')
+    PW = 'Gundal@2026'
+    def unlock(pw=PW):
+        pg.wait_for_selector('#s-pin.active'); pg.fill('#pin1', pw); pg.click('#btnPin')
+    def cust_next():
+        pg.click('#btnCustNext')
+        pg.wait_for_function("document.querySelector('.screen.active').id!=='s-customer' || (document.getElementById('custErr').textContent.length>0 && !document.getElementById('btnCustNext').disabled)", timeout=90000)
+    CODE_FOR = {'suit': 'bizformal', 'suit3': 'boardroom', 'tux': 'blacktie', 'shirt': 'office', 'blazer': 'bizcasual', 'sherwani': 'ethnic', 'kurta': 'ethnic'}
     act = lambda: pg.evaluate("document.querySelector('.screen.active').id")
     shot = lambda n: pg.screenshot(path=os.path.join(OUT, n + '.png'), full_page=True)
 
@@ -50,7 +58,13 @@ with sync_playwright() as p:
     shot('03_otp'); pg.fill('#otp', code); pg.wait_for_timeout(300); check('correct OTP -> agreement', act() == 's-consent')
     shot('04_agreement'); pg.click('#btnAgree'); check('agreement needs all ticks', 'tick all' in pg.inner_text('#consentErr'))
     boxes = pg.query_selector_all('.cbx'); boxes[0].check(); boxes[1].check(); pg.click('#btnAgree'); check('2 of 3 ticks still blocked', act() == 's-consent')
-    boxes[2].check(); pg.click('#btnAgree'); check('agreement -> shop setup', act() == 's-shop')
+    boxes[2].check(); pg.click('#btnAgree'); check('agreement -> create app password', act() == 's-pin' and 'Create' in pg.inner_text('#pinTitle'))
+    shot('04b_password')
+    pg.fill('#pin1', 'abc'); pg.click('#btnPin'); check('password needs 4+ characters', '4 characters' in pg.inner_text('#pinErr'))
+    pg.fill('#pin1', '1234'); pg.fill('#pin2', '1234'); pg.click('#btnPin'); check('too-easy password refused', 'easy to guess' in pg.inner_text('#pinErr'))
+    pg.fill('#pin1', PW); pg.fill('#pin2', PW + 'x'); pg.click('#btnPin'); check('passwords must match', 'not the same' in pg.inner_text('#pinErr'))
+    pg.fill('#pin2', PW); pg.click('#btnPin'); pg.wait_for_selector('#s-shop.active'); check('password saved -> shop setup', act() == 's-shop')
+    st = pg.evaluate('ATR.state().pin'); check('only a salted hash is stored, never the password', st and PW not in json.dumps(pg.evaluate('ATR.state()')) and len(st['salt']) > 10 and st['iter'] >= 100000)
     pg.click('#btnShopSave'); check('shop name required', 'shop name' in pg.inner_text('#shopErr'))
     pg.fill('#shopName', 'Sri Lakshmi Silks'); pg.fill('#shopAddr', 'abc'); pg.click('#btnShopSave'); check('address required', 'address' in pg.inner_text('#shopErr'))
     pg.fill('#shopAddr', '12, Chickpet Main Road, Bengaluru 560053')
@@ -75,7 +89,8 @@ with sync_playwright() as p:
         if photo:
             pg.set_input_files('#photoFile', fx(photo)); pg.wait_for_selector('#photoPrev:not(.hidden)', timeout=8000)
         if model is not None: pg.click(f'.model[data-i="{model}"]')
-        pg.click('#btnCustNext'); assert act() == 's-outfit', 'customer step blocked: ' + pg.inner_text('#custErr')
+        cust_next(); assert act() == 's-outfit', 'customer step blocked: ' + pg.inner_text('#custErr')
+        if gender == 'male' and not code and outfit: code = CODE_FOR[outfit]
         if code: pg.click(f'#codes .chip[data-c={code}]')
         if outfit: pg.click(f'#outfits .chip[data-o={outfit}]')
         if fabric: pg.set_input_files('#garFile', fx(fabric)); pg.wait_for_selector('#garPrev:not(.hidden)')
@@ -134,9 +149,9 @@ with sync_playwright() as p:
     check('busy background photo', d == [900, 1200])
     d, n = trial('female', photo='cust_female_halfbody.jpg', outfit='kurti', bg='studio', tag='half_body')
     check('half-body photo', d == [900, 1200])
-    pg.goto(f'http://127.0.0.1:{PORT}/index.html'); pg.click('#btnStart'); pg.click('#btnNewTrial')
+    pg.goto(f'http://127.0.0.1:{PORT}/index.html'); pg.click('#btnStart'); unlock(); pg.wait_for_selector('#s-home.active'); pg.click('#btnNewTrial')
     pg.set_input_files('#photoFile', fx('tiny.jpg')); pg.wait_for_timeout(500); check('too-small photo rejected', 'too small' in pg.inner_text('#custErr'))
-    pg.click('#btnCustNext'); check('cannot continue without photo/model', act() == 's-customer')
+    cust_next(); check('cannot continue without photo/model', act() == 's-customer')
 
     # fallback when the AI model cannot load
     pg.evaluate("TR.disableAI=true")
@@ -169,7 +184,26 @@ with sync_playwright() as p:
     # android back-button behaviour
     pg.click('#btnSettings'); check('back from settings', pg.evaluate('ATR.back()') and act() == 's-home'); check('back at home exits app', pg.evaluate('ATR.back()') is False)
     # persistence after reload
-    pg.reload(); pg.click('#btnStart'); check('login persists after restart', act() == 's-home')
+    pg.reload(); pg.click('#btnStart'); check('app asks for password after restart', act() == 's-pin' and 'Enter your app password' in pg.inner_text('#pinTitle'))
+    check('back button cannot skip the password screen', pg.evaluate('ATR.back()') is False and act() == 's-pin')
+    pg.fill('#pin1', 'wrongpass'); pg.click('#btnPin'); pg.wait_for_function("document.getElementById('pinErr').textContent.length>0"); check('wrong password refused', '4 tries left' in pg.inner_text('#pinErr') and act() == 's-pin')
+    for _ in range(4): pg.fill('#pin1', 'wrongpass'); pg.click('#btnPin'); pg.wait_for_timeout(400)
+    check('5 wrong tries -> locked out with countdown', 'Too many wrong tries' in pg.inner_text('#pinErr') and pg.is_disabled('#btnPin'))
+    shot('pw_lockout')
+    pg.evaluate("ATR.state().pinLockUntil=0"); pg.evaluate("document.getElementById('btnPin').disabled=false")
+    unlock(); pg.wait_for_selector('#s-home.active'); check('correct password -> home', act() == 's-home')
+    pg.click('#btnNewTrial'); pg.evaluate('ATR_lockNow()'); check('auto-lock shows the password screen', act() == 's-pin')
+    unlock(); pg.wait_for_selector('#s-customer.active'); check('after unlocking, returns to the same screen', act() == 's-customer')
+    pg.evaluate('ATR.back()')
+    pg.click('#btnSettings'); pg.click('#btnChangePin'); check('change password asks for the current one first', 'current password' in pg.inner_text('#pinTitle'))
+    unlock(); pg.wait_for_selector('#pin2Box:not(.hidden)'); pg.fill('#pin1', 'Saree#4321'); pg.fill('#pin2', 'Saree#4321'); pg.click('#btnPin'); pg.wait_for_selector('#s-home.active')
+    pg.reload(); pg.click('#btnStart'); unlock('Saree#4321'); pg.wait_for_selector('#s-home.active'); check('new password works', act() == 's-home')
+    pg.reload(); pg.click('#btnStart'); pg.click('#btnForgot'); check('forgot password -> phone check', act() == 's-phone')
+    pg.fill('#phone', '9000000001'); pg.click('#btnSendOtp'); check('reset needs the registered number', 'registered' in pg.inner_text('#phoneErr'))
+    pg.fill('#phone', pg.evaluate('ATR.state().phone')); pg.click('#btnSendOtp')
+    code = pg.evaluate("document.getElementById('otpNote').textContent.match(/\\d{6}/)[0]"); pg.fill('#otp', code)
+    pg.wait_for_selector('#s-pin.active'); check('after phone check, set a new password', 'Create' in pg.inner_text('#pinTitle'))
+    pg.fill('#pin1', PW); pg.fill('#pin2', PW); pg.click('#btnPin'); pg.wait_for_selector('#s-home.active'); check('password reset done', act() == 's-home')
 
     # ---------- individual user ----------
     pg.click('#btnSettings'); pg.click('#btnReset'); pg.click('#modalYes'); check('reset -> splash', act() == 's-splash')
@@ -177,7 +211,7 @@ with sync_playwright() as p:
     code = pg.evaluate("document.getElementById('otpNote').textContent.match(/\\d{6}/)[0]"); pg.fill('#otp', code); pg.wait_for_timeout(200)
     check('individual agreement wording', 'own photo' in pg.inner_text('#c1'))
     for c in pg.query_selector_all('.cbx'): c.check()
-    pg.click('#btnAgree'); check('individual skips shop setup', act() == 's-home')
+    pg.click('#btnAgree'); pg.fill('#pin1', PW); pg.fill('#pin2', PW); pg.click('#btnPin'); pg.wait_for_selector('#s-home.active'); check('individual: password then home (no shop setup)', act() == 's-home')
     check('individual: no shop header on photo', True)
     d, n = trial('male', photo='cust_male_plain.jpg', outfit='kurta', bg='studio', tag='individual_kurta')
     check('individual try-on', d == [900, 1200])
@@ -221,7 +255,8 @@ with sync_playwright() as p:
         pg.click('#gMale' if gender == 'male' else '#gFemale')
         if photo: pg.set_input_files('#photoCam' if cam else '#photoFile', fx(photo)); pg.wait_for_selector('#photoPrev:not(.hidden)')
         if model is not None: pg.click(f'.model[data-i="{model}"]')
-        pg.click('#btnCustNext')
+        cust_next()
+        if gender == 'male' and outfit: pg.click(f'#codes .chip[data-c={CODE_FOR[outfit]}]')
         if outfit: pg.click(f'#outfits .chip[data-o={outfit}]')
         if fabric: pg.set_input_files('#garCam' if cam else '#garFile', fx(fabric)); pg.wait_for_selector('#garPrev:not(.hidden)')
         pg.click('#btnOutfitNext'); pg.click('#btnColorsNext')
@@ -236,7 +271,7 @@ with sync_playwright() as p:
     check('customer: "Take live photo" opens the camera', opens('#camBtn') == ('photoCam', 'environment'))
     pg.set_input_files('#photoFile', fx('cust_female_plain.jpg')); pg.wait_for_selector('#photoPrev:not(.hidden)')
     check('after choosing, button says "Change photo"', 'Change photo' in pg.inner_text('#galBtn'))
-    pg.click('#btnCustNext'); pg.click('#outfits .chip[data-o=saree]')
+    cust_next(); pg.click('#outfits .chip[data-o=saree]')
     check('saree: "Choose from gallery" opens the gallery', opens('#garGalBtn') == ('garFile', None))
     check('saree: "Take live photo" opens the camera', opens('#garCamBtn') == ('garCam', 'environment'))
     check('both buttons visible side by side', pg.is_visible('#garGalBtn') and pg.is_visible('#garCamBtn'))
@@ -338,10 +373,105 @@ with sync_playwright() as p:
     check('AI told: change only body colour to navy, keep border exactly', 'ONLY its main body colour changed to navy' in pr and 'border must match the saree photo exactly' in pr)
     check('AI result labelled "same border"', 'same border' in pg.evaluate("ATR.temp().results[0].label"))
 
-    # narrow phone layout: nothing wider than the screen
-    pg.set_viewport_size({'width': 360, 'height': 740})
-    for s in ['s-result']:
-        check('no horizontal overflow at 360px', pg.evaluate('document.documentElement.scrollWidth') <= 360)
+
+    # ---------- Men: dress code first, then matching outfits ----------
+    for _ in range(8):
+        if act() == 's-home' or not pg.evaluate("ATR.back()"): break
+    pg.click('#btnNewTrial'); pg.click('#gMale'); pg.click('.model[data-i="0"]'); pg.click('#btnCustNext')
+    check('men: outfits hidden until a dress code is chosen', pg.evaluate("document.querySelectorAll('#outfits .chip').length") == 0 and pg.is_disabled('#btnOutfitNext') and 'First choose a dress code' in pg.inner_text('#outfitHint'))
+    shot('dresscode_01_first')
+    pg.click('#codes .chip[data-c=ethnic]')
+    names = pg.evaluate("[...document.querySelectorAll('#outfits .chip')].map(c=>c.dataset.o)")
+    check('Ethnic formal shows only sherwani and kurta', sorted(names) == ['kurta', 'sherwani'], names)
+    pg.click('#codes .chip[data-c=blacktie]'); names = pg.evaluate("[...document.querySelectorAll('#outfits .chip')].map(c=>c.dataset.o)")
+    check('Black tie shows tuxedo first (and suit)', names == ['tux', 'suit'], names)
+    check('Next works once code + outfit chosen', not pg.is_disabled('#btnOutfitNext'))
+    shot('dresscode_02_chosen')
+    pg.click('#s-outfit [data-back]'); pg.click('#gFemale'); pg.click('.model[data-i="0"]'); pg.click('#btnCustNext')
+    check('women: no dress-code step', pg.is_hidden('#codeBox') and pg.evaluate("document.querySelectorAll('#outfits .chip').length") == 6)
+    pg.click('#s-outfit [data-back]')
+
+    # ---------- Gender check with real photos (on-device face model) ----------
+    from skimage import data as _skd
+    from PIL import Image as _Im
+    _Im.fromarray(_skd.astronaut()).save(os.path.join(OUT, 'real_woman.jpg'), quality=92)
+    _Im.fromarray(_skd.camera()).convert('RGB').save(os.path.join(OUT, 'real_man.jpg'), quality=92)
+    pg.evaluate("GENDER.disabled=false")
+    def upload_real(name):
+        pg.evaluate("ATR.temp().src=null")
+        pg.set_input_files('#photoFile', os.path.join(OUT, name))
+        pg.wait_for_function("ATR.temp().src && ATR.temp().src.img && !ATR.temp().src.checking && ATR.temp().src.check", timeout=90000)
+        return pg.evaluate("ATR.temp().src.check")
+    pg.click('#gFemale'); r = upload_real('real_man.jpg')
+    check("man's photo detected as male", r.get('face') and r.get('gender') == 'male', r)
+    check("man's photo blocked in Female section", pg.is_visible('#gBlock') and 'looks like a man' in pg.inner_text('#gBlock'))
+    cust_next(); check('cannot continue with the wrong section', act() == 's-customer' and 'does not match' in pg.inner_text('#custErr'))
+    shot('gender_01_blocked')
+    pg.click('#gSwitch'); check('"Switch to Male" fixes it in one tap', pg.evaluate("ATR.temp().gender") == 'male' and pg.is_hidden('#gBlock') if pg.query_selector('#gBlock') else pg.evaluate("ATR.temp().gender") == 'male')
+    cust_next(); check('man in Male section continues', act() == 's-outfit'); pg.click('#s-outfit [data-back]')
+    r = upload_real('real_woman.jpg')
+    check("woman's photo detected as female", r.get('face') and r.get('gender') == 'female', r)
+    check("woman's photo blocked in Male section", pg.is_visible('#gBlock') and 'looks like a woman' in pg.inner_text('#gBlock'))
+    pg.click('#gFemale'); check('switching to Female removes the block', pg.query_selector('#gBlock') is None)
+    cust_next(); check('woman in Female section continues', act() == 's-outfit'); pg.click('#s-outfit [data-back]')
+    pg.click('#gMale'); check('switching back to Male blocks again', pg.is_visible('#gBlock'))
+    pg.evaluate("ATR.back()"); pg.click('#btnSettings'); pg.click('#optStrict'); check('owner can turn strict check off', pg.evaluate("ATR.state().genderStrict") is False)
+    pg.evaluate("ATR.back()"); pg.click('#btnNewTrial'); check('with strict off, no block', pg.query_selector('#gBlock') is None)
+    pg.evaluate("ATR.back()"); pg.click('#btnSettings'); pg.click('#optStrict'); pg.evaluate("ATR.back()")
+    pg.evaluate("GENDER.disabled=true")
+
+
+    # ---------- change colour right on the result screen ----------
+    for _ in range(8):
+        if act() == 's-home' or not pg.evaluate("ATR.back()"): break
+    pg.click('#btnNewTrial'); pg.click('#gFemale'); pg.click('.model[data-i="1"]'); cust_next(); pg.click('#outfits .chip[data-o=saree]')
+    pg.set_input_files('#garFile', fx('saree_red_butti.jpg')); pg.wait_for_selector('#garPrev:not(.hidden)')
+    pg.click('#btnOutfitNext');
+    if pg.is_checked('#multi'): pg.click('#multi')
+    pg.click('#btnColorsNext'); pg.click('#modeQuick'); pg.click('#btnGenerate'); pg.wait_for_selector('#resultWrap:not(.hidden)', timeout=60000)
+    check('colour bar shown next to the look', pg.is_visible('#qcolors') and pg.evaluate("document.querySelectorAll('#qcSw button').length") >= 15)
+    check('saree border not offered (stays as photo)', pg.query_selector('#qcParts button[data-p=border]') is None and 'border stays the same' in pg.inner_text('#qcNote'))
+    before = pg.evaluate("document.getElementById('resultImg').src.length")
+    src0 = pg.evaluate("document.getElementById('resultImg').src")
+    pg.click('#qcSw button[data-h="#0b6e8c"]'); pg.wait_for_function("document.getElementById('resultImg').src !== %s" % json.dumps(src0), timeout=30000)
+    check('tap a colour -> look changes instantly on the same screen', act() == 's-result' and 'Peacock' in pg.evaluate("ATR.temp().results[0].label") and pg.evaluate("ATR.temp().recolor") == '#0b6e8c')
+    check('selected colour is marked', pg.get_attribute('#qcSw button[data-h="#0b6e8c"]', 'class') == 'on')
+    shot('qc_female_saree')
+    pg.click('#qcParts button[data-p=blouse]'); src1 = pg.evaluate("document.getElementById('resultImg').src")
+    pg.click('#qcSw button[data-h="#d6247a"]'); pg.wait_for_function("document.getElementById('resultImg').src !== %s" % json.dumps(src1), timeout=30000)
+    check('blouse colour changes too', pg.evaluate("ATR.temp().colors.blouse") == '#d6247a')
+    pg.click('#qcSw button[data-h="#d6247a"]') if False else None
+    for _ in range(8):
+        if act() == 's-home' or not pg.evaluate("ATR.back()"): break
+    pg.click('#btnNewTrial'); pg.click('#gMale'); pg.click('.model[data-i="0"]'); cust_next(); pg.click('#codes .chip[data-c=bizformal]'); pg.click('#btnOutfitNext'); pg.click('#btnColorsNext'); pg.click('#modeQuick'); pg.click('#btnGenerate'); pg.wait_for_selector('#resultWrap:not(.hidden)', timeout=60000)
+    parts = pg.evaluate("[...document.querySelectorAll('#qcParts button')].map(b=>b.dataset.p)")
+    check('men: suit, shirt and tie colours offered', parts == ['suit', 'shirt', 'tie'], parts)
+    check('men get suiting colours (navy, charcoal, black…)', all(pg.query_selector(f'#qcSw button[data-h="{c}"]') for c in ['#1a2547', '#36393f', '#141414']))
+    src2 = pg.evaluate("document.getElementById('resultImg').src"); pg.click('#qcSw button[data-h="#36393f"]'); pg.wait_for_function("document.getElementById('resultImg').src !== %s" % json.dumps(src2), timeout=30000)
+    check('men: suit colour changes instantly', pg.evaluate("ATR.temp().colors.suit") == '#36393f' and 'Charcoal' in pg.evaluate("ATR.temp().results[0].label"))
+    pg.click('#qcParts button[data-p=shirt]'); check('shirt colours offered', pg.query_selector('#qcSw button[data-h="#87c2e8"]') is not None)
+    shot('qc_male_suit')
+
+    # ---------- every screen size: small phone, phone, tablet, computer ----------
+    for w, h, tag in [(320, 640, 'phone_small'), (390, 844, 'phone'), (800, 1280, 'tablet'), (1366, 768, 'computer'), (844, 390, 'phone_landscape')]:
+        pg.set_viewport_size({'width': w, 'height': h})
+        bad = []
+        for scr in ['home', 'customer', 'settings']:
+            for _ in range(8):
+                if act() == 's-home' or not pg.evaluate("ATR.back()"): break
+            if scr == 'customer': pg.click('#btnNewTrial')
+            if scr == 'settings': pg.click('#btnSettings')
+            pg.wait_for_timeout(150)
+            if pg.evaluate('document.documentElement.scrollWidth') > w: bad.append(scr)
+            if scr == 'customer': shot(f'size_{tag}_customer')
+        check(f'no sideways scrolling at {w}x{h} ({tag})', not bad, bad)
+    for _ in range(8):
+        if act() == 's-home' or not pg.evaluate("ATR.back()"): break
+    pg.set_viewport_size({'width': 1366, 'height': 768}); pg.click('#btnNewTrial'); pg.click('#gFemale'); pg.click('.model[data-i="1"]'); cust_next(); pg.click('#btnOutfitNext'); pg.click('#btnColorsNext'); pg.click('#modeQuick'); pg.click('#btnGenerate')
+    pg.wait_for_selector('#resultWrap:not(.hidden)', timeout=60000); pg.wait_for_timeout(300); shot('size_computer_result')
+    box = pg.evaluate("(()=>{const i=document.getElementById('resultImg').getBoundingClientRect(),b=document.getElementById('btnSave').getBoundingClientRect();return {img:[i.left,i.right,i.bottom],btn:[b.left,b.top]}})()")
+    check('computer: result photo and buttons side by side', box['btn'][0] > box['img'][1] - 5 and box['img'][2] <= 768 + 400, box)
+    pg.set_viewport_size({'width': 390, 'height': 844})
     b.close()
 
 srv.shutdown()

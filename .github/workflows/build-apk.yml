@@ -17,11 +17,18 @@ jobs:
         with: { python-version: '3.12' }
       - name: Install test tools
         run: |
-          pip install playwright pillow
+          pip install playwright pillow scikit-image
           python -m playwright install --with-deps chromium
           echo "CHROME=$(python -c 'from playwright.sync_api import sync_playwright as s; p=s().start(); print(p.chromium.executable_path); p.stop()')" >> $GITHUB_ENV
-      - name: Run regression suite (all outfits, sarees, suits, AI models, themes)
+      - name: Run regression suite (all outfits, sarees, suits, AI models, themes, security)
         run: python tests/regression.py
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Run the same suite on the obfuscated build (what ships in the APK)
+        run: |
+          cp -r app/src/main/assets/www /tmp/www-obf
+          scripts/obfuscate.sh /tmp/www-obf
+          WWW=/tmp/www-obf python tests/regression.py
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: regression-screenshots, path: tests/out }
@@ -35,6 +42,10 @@ jobs:
         with: { distribution: temurin, java-version: '17' }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.9' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Obfuscate the app code that goes into the APK
+        run: scripts/obfuscate.sh app/src/main/assets/www
       - name: Prepare signing key
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}

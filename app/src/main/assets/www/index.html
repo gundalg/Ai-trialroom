@@ -88,6 +88,22 @@
     </div>
   </section>
 
+  <!-- Password: create / unlock -->
+  <section class="screen" id="s-pin">
+    <header class="top"><svg class="logo-s"><use href="#glogo"/></svg><span id="pinTop">App password</span></header>
+    <div class="pad">
+      <div class="lockicon">🔒</div>
+      <h2 id="pinTitle">Create an app password</h2>
+      <p class="sub" id="pinSub">Protects customer photos and your settings. You will need it every time you open AI TrialRoom.</p>
+      <label class="field"><span>Password</span><input id="pin1" type="password" autocomplete="new-password" placeholder="At least 4 characters"></label>
+      <label class="field" id="pin2Box"><span>Type it again</span><input id="pin2" type="password" autocomplete="new-password"></label>
+      <label class="check small"><input type="checkbox" id="pinShow"><span>Show password</span></label>
+      <p class="err" id="pinErr"></p>
+      <button class="btn" id="btnPin">Save password</button>
+      <button class="link" id="btnForgot">Forgot password?</button>
+    </div>
+  </section>
+
   <!-- Shop setup -->
   <section class="screen" id="s-shop">
     <header class="top"><button class="back" data-back>‹</button><span>Your shop</span></header>
@@ -155,6 +171,7 @@
         <label class="btn ghost cam" id="galBtn" for="photoFile">🖼 From gallery</label>
         <label class="btn cam" id="camBtn">📷 Live photo<input type="file" accept="image/*" capture="environment" id="photoCam" hidden></label>
       </div>
+      <div id="gcheck"></div>
       <p class="sub center">No photo? Choose an AI model:</p>
       <div class="models" id="models"></div>
       <p class="err" id="custErr"></p>
@@ -167,11 +184,13 @@
     <header class="top"><button class="back" data-back>‹</button><span>Step 2 of 4 · Outfit</span></header>
     <div class="pad">
       <h2>Choose the outfit</h2>
-      <div class="chips" id="outfits"></div>
       <div id="codeBox" class="hidden">
-        <h3>Official dress code</h3>
+        <h3><span class="stepn">1</span>Choose the dress code</h3>
         <div class="chips" id="codes"></div>
       </div>
+      <h3 id="outfitLbl" class="hidden"><span class="stepn">2</span>Choose the outfit</h3>
+      <p class="note" id="outfitHint"></p>
+      <div class="chips" id="outfits"></div>
       <div id="garmentBox">
         <h3 id="garmentLbl">Saree photo (optional)</h3>
         <label class="photo-drop small" id="garDrop">
@@ -227,6 +246,11 @@
       <div id="resultWrap" class="hidden">
         <img id="resultImg" class="result" alt="Try-on result">
         <div class="thumbs" id="variants"></div>
+        <div class="qcolors" id="qcolors">
+          <div class="qc-head"><b>Change colour</b><span class="note" id="qcNote"></span></div>
+          <div class="qc-parts" id="qcParts"></div>
+          <div class="qc-sw" id="qcSw"></div>
+        </div>
         <label class="field fit"><span>Fit: move neckline <small id="aiNote"></small></span>
           <input type="range" id="neckAdj" min="-6" max="6" step="1" value="0"></label>
         <div class="row">
@@ -264,6 +288,13 @@
           <p>Photos you send to the AI are processed by Google. Use it only with the customer's permission.</p>
         </details>
       </div>
+      <div class="card">
+        <b>Security</b>
+        <label class="check"><input type="checkbox" id="optStrict"><span>Strict gender check: a man's photo can't be used in the Female section, and a woman's photo can't be used in the Male section</span></label>
+        <label class="check"><input type="checkbox" id="optSecure"><span>Block screenshots and screen recording (protects customer photos)</span></label>
+        <label class="check"><input type="checkbox" id="optAutoLock"><span>Lock the app after 2 minutes in the background</span></label>
+        <button class="btn ghost" id="btnChangePin">Change app password</button>
+      </div>
       <button class="btn ghost" id="btnEditShop">Edit shop and theme</button>
       <button class="btn ghost" id="btnClearLooks">Delete all saved looks</button>
       <button class="btn ghost danger" id="btnReset">Sign out and reset app</button>
@@ -281,6 +312,8 @@
 </div>
 
 <script src="mp/selfie_segmentation.js"></script>
+<script src="fa/face-api.js"></script>
+<script src="gender.js"></script>
 <script src="render.js"></script>
 <script src="ai.js"></script>
 <script src="app.js"></script>

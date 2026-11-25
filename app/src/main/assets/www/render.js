@@ -45,12 +45,12 @@ const TR = (() => {
     ]
   };
   const CODES = [
-    { id: 'bizformal', name: 'Business formal', outfit: 'suit', colors: { suit: '#1a2547', shirt: '#f8f8f6', tie: '#6e0f2d' } },
-    { id: 'bizcasual', name: 'Business casual', outfit: 'blazer', colors: { blazer: '#2948a8', shirt: '#f8f8f6', pant: '#d8c3a0' } },
-    { id: 'office', name: 'Office daily', outfit: 'shirt', colors: { shirt: '#87c2e8', pant: '#36393f', tie: 'none' } },
-    { id: 'boardroom', name: 'Boardroom', outfit: 'suit3', colors: { suit: '#36393f', vest: '#36393f', shirt: '#f8f8f6', tie: '#1a2547' } },
-    { id: 'blacktie', name: 'Black tie', outfit: 'tux', colors: { suit: '#141414', shirt: '#f8f8f6', tie: '#141414' } },
-    { id: 'ethnic', name: 'Ethnic formal', outfit: 'sherwani', colors: { sherwani: '#f4ecd8', churidar: '#f4ecd8', trim: '#d4af37' } }
+    { id: 'bizformal', name: 'Business formal', outfits: ['suit', 'suit3'], outfit: 'suit', colors: { suit: '#1a2547', shirt: '#f8f8f6', tie: '#6e0f2d' } },
+    { id: 'bizcasual', name: 'Business casual', outfits: ['blazer', 'shirt'], outfit: 'blazer', colors: { blazer: '#2948a8', shirt: '#f8f8f6', pant: '#d8c3a0' } },
+    { id: 'office', name: 'Office daily', outfits: ['shirt', 'blazer'], outfit: 'shirt', colors: { shirt: '#87c2e8', pant: '#36393f', tie: 'none' } },
+    { id: 'boardroom', name: 'Boardroom', outfits: ['suit3', 'suit'], outfit: 'suit3', colors: { suit: '#36393f', vest: '#36393f', shirt: '#f8f8f6', tie: '#1a2547' } },
+    { id: 'blacktie', name: 'Black tie', outfits: ['tux', 'suit'], outfit: 'tux', colors: { suit: '#141414', shirt: '#f8f8f6', tie: '#141414' } },
+    { id: 'ethnic', name: 'Ethnic formal', outfits: ['sherwani', 'kurta'], outfit: 'sherwani', colors: { sherwani: '#f4ecd8', churidar: '#f4ecd8', trim: '#d4af37' } }
   ];
   const BGS = [
     { id: 'silk', name: 'Silk saree gallery', g: 'female' },

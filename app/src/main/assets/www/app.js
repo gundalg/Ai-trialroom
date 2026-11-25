@@ -5,8 +5,15 @@
   const KEY = 'atr.v1';
   const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } };
   let S = load();
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { // storage full: drop oldest looks and retry
-      if (S.looks && S.looks.length) { S.looks.splice(-3); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (_) {} } } };
+  const NATIVE = !!(window.AndroidBridge && AndroidBridge.secureGet);
+  let secureKey = null;
+  if (NATIVE) { try { const k = AndroidBridge.secureGet('aiKey'); if (k) S.aiKey = k; else if (S.aiKey) AndroidBridge.secureSet('aiKey', S.aiKey); secureKey = S.aiKey || ''; } catch (e) {} }
+  const plain = () => { const c = Object.assign({}, S); if (NATIVE) delete c.aiKey; return JSON.stringify(c); };
+  const save = () => {
+    if (NATIVE && (S.aiKey || '') !== secureKey) { try { AndroidBridge.secureSet('aiKey', S.aiKey || ''); secureKey = S.aiKey || ''; } catch (e) {} }
+    try { localStorage.setItem(KEY, plain()); } catch (e) { // storage full: drop oldest looks and retry
+      if (S.looks && S.looks.length) { S.looks.splice(-3); try { localStorage.setItem(KEY, plain()); } catch (_) {} } } };
+  if (NATIVE) save();
   const T = { gender: 'female', src: null, srcKey: '', outfit: 'saree', code: null, colors: {}, fabric: null, fabricAvg: null, garImg: null, part: null, bg: 'silk', multi: false, results: [], P: null, PKey: '', neckAdj: 0 };
   const assets = { gundal: null, shopLogo: null };
 
@@ -31,7 +38,7 @@
   function back() {
     if ($('modal') && !$('modal').classList.contains('hidden')) { $('modal').classList.add('hidden'); return true; }
     const cur = document.querySelector('.screen.active').id.slice(2);
-    if (cur === 'home' || cur === 'splash' || !stack.length) return false;
+    if (cur === 'home' || cur === 'splash' || cur === 'pin' || !stack.length) return false;
     let prev = stack.pop(); if (prev === 'result') prev = stack.pop() || 'home';
     go(prev, false); return true;
   }
@@ -43,11 +50,80 @@
   function routeAfterLogin() { stack.length = 0; if (S.role === 'owner' && !S.shop) go('shop', false); else go('home', false); }
 
   /* ---------- splash / role ---------- */
-  $('btnStart').onclick = () => { if (S.verified && S.consentAt && S.role) routeAfterLogin(); else go('role'); };
+  $('btnStart').onclick = () => { if (S.verified && S.consentAt && S.role) openPin(S.pin ? 'unlock' : 'create'); else go('role'); };
+
+  /* ---------- app password (PBKDF2-SHA256, salted; only the hash is stored) ---------- */
+  const enc = new TextEncoder(), b64e = u => btoa(String.fromCharCode(...new Uint8Array(u))), b64d = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
+  async function pwHash(pw, salt, iter) {
+    const k = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveBits']);
+    return b64e(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: b64d(salt), iterations: iter }, k, 256));
+  }
+  const WEAK = ['0000', '1111', '1234', '12345', '123456', '4321', '2222', '9999', 'password', '1212', '0123', 'abcd'];
+  let pinState = { mode: 'unlock', resume: null }, pinTimer = null;
+  function openPin(mode, resume) {
+    pinState = { mode, resume: resume || null };
+    stack.length = 0; go('pin', false);
+  }
+  enter.pin = () => {
+    const m = pinState.mode, create = m === 'create';
+    $('pinTitle').textContent = create ? 'Create an app password' : m === 'change' ? 'Enter your current password' : 'Enter your app password';
+    $('pinSub').textContent = create ? 'Protects customer photos and your settings. You will need it every time you open AI TrialRoom.' : m === 'change' ? 'Then you can set a new password.' : 'AI TrialRoom is locked.';
+    $('pin2Box').classList.toggle('hidden', !create); $('btnPin').textContent = create ? 'Save password' : 'Unlock';
+    $('btnForgot').classList.toggle('hidden', create);
+    $('pin1').value = ''; $('pin2').value = ''; $('pinErr').textContent = ''; $('pinShow').checked = false; $('pin1').type = $('pin2').type = 'password';
+    $('pin1').autocomplete = create ? 'new-password' : 'current-password';
+    lockCountdown();
+  };
+  function lockCountdown() {
+    clearInterval(pinTimer);
+    const tick = () => { const left = Math.ceil(((S.pinLockUntil || 0) - Date.now()) / 1000);
+      if (left > 0 && pinState.mode !== 'create') { $('btnPin').disabled = true; $('pinErr').textContent = `Too many wrong tries. Try again in ${left} seconds.`; }
+      else { $('btnPin').disabled = false; if (/Too many/.test($('pinErr').textContent)) $('pinErr').textContent = ''; clearInterval(pinTimer); } };
+    tick(); pinTimer = setInterval(tick, 1000);
+  }
+  $('pinShow').onchange = e => { $('pin1').type = $('pin2').type = e.target.checked ? 'text' : 'password'; };
+  $('pin1').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnPin').click(); });
+  $('pin2').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnPin').click(); });
+  $('btnPin').onclick = async () => {
+    const p1 = $('pin1').value, err = $('pinErr'), b = $('btnPin');
+    if (b.disabled) return;
+    if (pinState.mode === 'create') {
+      if (p1.length < 4) { err.textContent = 'Use at least 4 characters.'; return; }
+      if (WEAK.includes(p1.toLowerCase()) || /^(.)\1+$/.test(p1)) { err.textContent = 'This password is too easy to guess. Please choose another.'; return; }
+      if (p1 !== $('pin2').value) { err.textContent = 'The two passwords are not the same.'; return; }
+      b.disabled = true;
+      try { const salt = b64e(crypto.getRandomValues(new Uint8Array(16))), iter = 150000; S.pin = { salt, iter, hash: await pwHash(p1, salt, iter) }; S.pinFails = 0; S.pinLockUntil = 0; save(); }
+      finally { b.disabled = false; }
+      toast('App password saved ✓'); unlocked = true; routeAfterLogin(); return;
+    }
+    if (!S.pin) { openPin('create'); return; }
+    if ((S.pinLockUntil || 0) > Date.now()) { lockCountdown(); return; }
+    b.disabled = true; let ok = false;
+    try { ok = (await pwHash(p1, S.pin.salt, S.pin.iter)) === S.pin.hash; } finally { b.disabled = false; }
+    if (!ok) {
+      S.pinFails = (S.pinFails || 0) + 1;
+      if (S.pinFails >= 5) S.pinLockUntil = Date.now() + Math.min(15 * 60, 30 * 2 ** (S.pinFails - 5)) * 1000;
+      save(); err.textContent = S.pinFails >= 5 ? '' : `Wrong password. ${5 - S.pinFails} tries left.`; $('pin1').value = ''; lockCountdown(); return;
+    }
+    S.pinFails = 0; S.pinLockUntil = 0; save(); unlocked = true;
+    if (pinState.mode === 'change') { openPin('create'); return; }
+    if (pinState.resume) { const r = pinState.resume; stack.length = 0; stack.push('home'); go(r, false); return; }
+    routeAfterLogin();
+  };
+  $('btnForgot').onclick = () => { forgot = true; stack.length = 0; go('phone', false); toast('Verify your phone number to set a new password'); };
+  // Lock again when the app comes back after 2 minutes in the background
+  let unlocked = false, hiddenAt = 0;
+  const OPEN_SCREENS = ['splash', 'role', 'phone', 'consent', 'pin'];
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { hiddenAt = Date.now(); return; }
+    const cur = document.querySelector('.screen.active').id.slice(2);
+    if (S.pin && S.autoLock !== false && unlocked && hiddenAt && Date.now() - hiddenAt > 120000 && !OPEN_SCREENS.includes(cur)) { unlocked = false; openPin('unlock', cur === 'result' ? 'home' : cur); }
+  });
+  window.ATR_lockNow = () => { const cur = document.querySelector('.screen.active').id.slice(2); if (S.pin && !OPEN_SCREENS.includes(cur)) { unlocked = false; openPin('unlock', cur === 'result' ? 'home' : cur); } };
   document.querySelectorAll('.choice').forEach(b => b.onclick = () => { S.role = b.dataset.role; save(); document.querySelectorAll('.choice').forEach(x => x.classList.toggle('on', x === b)); go('phone'); });
 
   /* ---------- phone + OTP (demo provider; replace sendOtp() with an SMS gateway) ---------- */
-  let otp = null, otpAt = 0, tries = 0, resendTimer = null;
+  let otp = null, otpAt = 0, tries = 0, resendTimer = null, forgot = false;
   enter.phone = () => { $('phone').value = S.phone || ''; $('otpBox').classList.add('hidden'); $('phoneErr').textContent = ''; };
   $('phone').addEventListener('input', e => { let d = e.target.value.replace(/\D/g, ''); if (d.length > 10 && /^(91|0)/.test(d)) d = d.replace(/^(91|0)/, ''); e.target.value = d.slice(0, 10); });
   $('otp').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); if (e.target.value.length === 6) $('btnVerify').click(); });
@@ -60,6 +136,7 @@
   $('btnSendOtp').onclick = () => {
     const v = $('phone').value.trim();
     if (!/^[6-9]\d{9}$/.test(v)) { $('phoneErr').textContent = 'Enter a valid 10-digit Indian mobile number.'; return; }
+    if (forgot && S.phone && v !== S.phone) { $('phoneErr').textContent = 'To reset the password, use the mobile number you registered with (ending ' + S.phone.slice(-4) + ').'; return; }
     $('phoneErr').textContent = ''; S.phone = v; save(); sendOtp(v);
     $('otpBox').classList.remove('hidden'); $('otp').value = ''; $('otpErr').textContent = ''; $('btnSendOtp').textContent = 'Change number or send again'; startResend(); $('otp').focus();
   };
@@ -71,7 +148,9 @@
     if (++tries > 5) { $('otpErr').textContent = 'Too many attempts. Tap Resend code.'; otp = null; return; }
     if (v !== otp) { $('otpErr').textContent = 'That code is not correct. Please check and try again.'; return; }
     S.verified = true; S.verifiedAt = new Date().toISOString(); save(); otp = null; clearInterval(resendTimer);
-    toast('Phone number verified ✓'); go('consent');
+    toast('Phone number verified ✓');
+    if (forgot) { forgot = false; delete S.pin; S.pinFails = 0; S.pinLockUntil = 0; save(); openPin('create'); return; }
+    go('consent');
   };
 
   /* ---------- agreement ---------- */
@@ -92,7 +171,8 @@
   };
   $('btnAgree').onclick = () => {
     if (![...document.querySelectorAll('.cbx')].every(c => c.checked)) { $('consentErr').textContent = 'Please tick all three boxes to continue.'; return; }
-    S.consentAt = new Date().toISOString(); S.consentRole = S.role; save(); routeAfterLogin();
+    S.consentAt = new Date().toISOString(); S.consentRole = S.role; save();
+    if (!S.pin) openPin('create'); else routeAfterLogin();
   };
 
   /* ---------- shop setup ---------- */
@@ -128,10 +208,32 @@
   $('btnSettings').onclick = () => go('settings');
 
   /* ---------- customer photo / AI model ---------- */
-  enter.customer = () => { $('custTitle').textContent = S.role === 'owner' ? 'Customer photo' : 'Your photo'; setGender(T.gender, false); drawModels(); $('custErr').textContent = ''; };
+  enter.customer = () => { $('custTitle').textContent = S.role === 'owner' ? 'Customer photo' : 'Your photo'; setGender(T.gender, false); drawModels(); $('custErr').textContent = ''; GENDER.load(); };
   function setGender(g, reset = true) {
     if (reset && g !== T.gender) { T.outfit = TR.OUTFITS[g][0].id; T.code = null; T.colors = {}; T.fabric = null; T.garImg = null; T.bg = g === 'male' ? 'tailor' : 'silk'; if (T.src && T.src.model) { T.src = null; } }
     T.gender = g; $('gFemale').classList.toggle('on', g === 'female'); $('gMale').classList.toggle('on', g === 'male');
+    showGenderCheck();
+  }
+  const strict = () => S.genderStrict !== false;
+  // Decide whether the uploaded photo fits the chosen section (Female/Male)
+  function genderBlocked() {
+    const r = T.src && T.src.img && T.src.check;
+    return !!(strict() && r && r.face && r.gender !== T.gender && r.p >= 0.6);
+  }
+  function showGenderCheck() {
+    const box = $('gcheck'); if (!box) return;
+    const r = T.src && T.src.img ? T.src.check : null;
+    if (!r) { box.innerHTML = T.src && T.src.img && T.src.checking ? '<div class="busy-inline"><div class="spin"></div>Checking the photo…</div>' : ''; return; }
+    if (genderBlocked()) {
+      const other = T.gender === 'female' ? 'male' : 'female', word = other === 'male' ? 'a man' : 'a woman', sec = T.gender === 'female' ? 'Female' : 'Male';
+      box.innerHTML = `<div class="gpanel" id="gBlock"><b>This photo looks like ${word}.</b> It can't be used in the ${sec} section.<div class="row"><button class="btn" id="gSwitch">Switch to ${other === 'male' ? 'Male' : 'Female'}</button><button class="btn ghost" id="gOther">Choose another photo</button></div></div>`;
+      $('gSwitch').onclick = () => { setGender(other); drawModels(); };
+      $('gOther').onclick = () => $('photoFile').click();
+      return;
+    }
+    if (r.face && r.faces > 1) { box.innerHTML = '<div class="gnote">More than one person is in this photo. For the best result, use a photo with only the customer.</div>'; return; }
+    if (r.face === false) { box.innerHTML = '<div class="gnote">The face is not clearly visible. For the best result, use a clear photo with the face looking at the camera.</div>'; return; }
+    box.innerHTML = r.face ? `<div class="gnote ok">Photo checked ✓</div>` : '';
   }
   document.querySelectorAll('#genderSeg button').forEach(b => b.onclick = () => { setGender(b.dataset.g); drawModels(); });
   function drawModels() {
@@ -147,22 +249,36 @@
   const onPhoto = async e => {
     try { const d = await readFile(e.target.files[0]); const ds = await downscale(d, 1600, 0.92); const img = await loadImg(ds.url);
       if (img.width < 200 || img.height < 200) throw new Error('This photo is too small. Please use a clearer photo.');
-      T.src = { img }; T.srcKey = 'p' + Date.now(); $('galBtn').textContent = '🖼 Change photo'; $('photoPrev').src = ds.url; $('photoPrev').classList.remove('hidden'); $('photoHint').classList.add('hidden'); drawModels(); $('custErr').textContent = '';
+      const src = { img, checking: true }; T.src = src; T.srcKey = 'p' + Date.now(); $('galBtn').textContent = '🖼 Change photo'; $('photoPrev').src = ds.url; $('photoPrev').classList.remove('hidden'); $('photoHint').classList.add('hidden'); drawModels(); $('custErr').textContent = '';
+      showGenderCheck();
+      src.checkP = GENDER.check(img); const r = await src.checkP; src.checking = false; src.check = r;
+      if (T.src === src) showGenderCheck();
     } catch (err) { $('custErr').textContent = err.message; }
     e.target.value = '';
   };
   $('photoFile').onchange = onPhoto; $('photoCam').onchange = onPhoto;
-  $('btnCustNext').onclick = () => { if (!T.src) { $('custErr').textContent = 'Upload a photo or choose an AI model.'; return; } go('outfit'); };
+  $('btnCustNext').onclick = async () => {
+    if (!T.src) { $('custErr').textContent = 'Upload a photo or choose an AI model.'; return; }
+    if (T.src.checking && T.src.checkP) { const b = $('btnCustNext'); b.disabled = true; b.textContent = 'Checking photo…'; try { await T.src.checkP; await new Promise(r => setTimeout(r, 0)); } finally { b.disabled = false; b.textContent = 'Next'; } }
+    if (genderBlocked()) { $('custErr').textContent = 'This photo does not match the selected section. Switch section or choose another photo.'; return; }
+    go('outfit'); };
 
   /* ---------- outfit ---------- */
   enter.outfit = () => {
-    const list = TR.OUTFITS[T.gender]; if (!list.find(o => o.id === T.outfit)) T.outfit = list[0].id;
-    $('outfits').innerHTML = list.map(o => `<button class="chip ${o.id === T.outfit ? 'on' : ''}" data-o="${o.id}">${o.name}</button>`).join('');
-    $('outfits').querySelectorAll('.chip').forEach(c => c.onclick = () => { if (T.outfit !== c.dataset.o) { T.outfit = c.dataset.o; T.code = null; T.colors = {}; T.fabric = null; T.garImg = null; } enter.outfit(); });
-    $('codeBox').classList.toggle('hidden', T.gender !== 'male');
+    const male = T.gender === 'male', code = male ? TR.CODES.find(c => c.id === T.code) : null;
+    let list = TR.OUTFITS[T.gender];
+    if (male && code) list = code.outfits.map(id => list.find(o => o.id === id)).filter(Boolean);
+    if (!list.find(o => o.id === T.outfit)) T.outfit = (male && code) ? code.outfit : list[0].id;
+    $('codeBox').classList.toggle('hidden', !male); $('outfitLbl').classList.toggle('hidden', !male);
     $('codes').innerHTML = TR.CODES.map(c => `<button class="chip ${c.id === T.code ? 'on' : ''}" data-c="${c.id}">${c.name}</button>`).join('');
-    $('codes').querySelectorAll('.chip').forEach(b => b.onclick = () => { const c = TR.CODES.find(x => x.id === b.dataset.c); T.code = c.id; T.outfit = c.outfit; T.colors = Object.assign({}, c.colors); T.fabric = null; T.garImg = null; enter.outfit(); });
-    const od = outfitDef(); $('garmentBox').classList.toggle('hidden', !od.photo);
+    $('codes').querySelectorAll('.chip').forEach(b => b.onclick = () => { const c = TR.CODES.find(x => x.id === b.dataset.c); if (T.code !== c.id) { T.code = c.id; T.outfit = c.outfit; T.colors = Object.assign({}, c.colors); T.fabric = null; T.garImg = null; } enter.outfit(); });
+    const waiting = male && !code;
+    $('outfitHint').textContent = waiting ? 'First choose a dress code above. Then the matching outfits appear here.' : (male ? `Outfits for ${code.name.toLowerCase()}:` : '');
+    $('outfits').classList.toggle('locked', waiting);
+    $('outfits').innerHTML = waiting ? '' : list.map(o => `<button class="chip ${o.id === T.outfit ? 'on' : ''}" data-o="${o.id}">${o.name}</button>`).join('');
+    $('outfits').querySelectorAll('.chip').forEach(c => c.onclick = () => { if (T.outfit !== c.dataset.o) { T.outfit = c.dataset.o; T.colors = Object.assign({}, (code && code.outfit === c.dataset.o) ? code.colors : {}); T.fabric = null; T.garImg = null; } enter.outfit(); });
+    $('btnOutfitNext').disabled = waiting;
+    const od = outfitDef(); $('garmentBox').classList.toggle('hidden', waiting || !od.photo);
     if (od.photo) { $('garmentLbl').textContent = od.photo + ' (optional)'; $('garHint').innerHTML = `<b>${od.photo}</b><br>Use a button below`; }
     $('garGalBtn').textContent = T.garImg ? '🖼 Change photo' : '🖼 From gallery';
     $('garPrev').classList.toggle('hidden', !T.garImg); $('garHint').classList.toggle('hidden', !!T.garImg); $('garClear').classList.toggle('hidden', !T.garImg); if (T.garImg) $('garPrev').src = T.garImg.src;
@@ -173,7 +289,7 @@
   };
   $('garFile').onchange = onGarment; $('garCam').onchange = onGarment;
   $('garClear').onclick = () => { T.garImg = null; T.fabric = null; T.recolor = null; T.borderTile = null; enter.outfit(); };
-  $('btnOutfitNext').onclick = () => go('colors');
+  $('btnOutfitNext').onclick = () => { if (T.gender === 'male' && !T.code) { toast('Please choose a dress code first'); return; } go('colors'); };
 
   /* ---------- colours ---------- */
   function ensureColors() { for (const [k, , d] of outfitDef().parts) if (!T.colors[k]) T.colors[k] = d; }
@@ -241,7 +357,7 @@
   function variants() {
     ensureColors(); const main = outfitDef().parts[0][0];
     const list = [Object.assign({}, T.colors, T.fabric ? { [main]: T.recolor || 'orig' } : {})];
-    if (T.multi) {
+    if (T.multi && !T.single) {
       const cur = T.fabric ? T.recolor : T.colors[main], picks = ['#6e0f2d', '#1a2547', '#127a78', '#d6247a', '#36393f', '#d4af37', '#2948a8', '#c8102e', '#f4ecd8', '#0f4d32'].filter(c => c !== cur);
       for (let i = 0; i < 3; i++) list.push(Object.assign({}, T.colors, { [main]: picks[(i * 3 + (T.gender === 'male' ? 1 : 0)) % picks.length] }));
     }
@@ -279,7 +395,7 @@
   async function generate() {
     if (T.mode === 'ai') return generateAI();
     if (busy) return; busy = true; T.lastAI = false;
-    $('busy').classList.remove('hidden'); $('resultWrap').classList.add('hidden'); $('busyTxt').textContent = 'Finding the person in the photo…';
+    if (!T.single) { $('busy').classList.remove('hidden'); $('resultWrap').classList.add('hidden'); } $('busyTxt').textContent = 'Finding the person in the photo…';
     try {
       await new Promise(r => setTimeout(r, 30));
       if (!T.P || T.PKey !== T.srcKey) { T.P = await TR.preparePerson(T.src); T.PKey = T.srcKey; }
@@ -299,7 +415,42 @@
     } catch (err) { console.error(err); $('busy').classList.add('hidden'); toast(err.message || 'Something went wrong. Please try again.', 4500); back(); }
     finally { busy = false; }
   }
+  /* ---------- instant colour change on the result screen ---------- */
+  // Hand-picked colours that suit each look (Indian festive/silk shades for women, classic suiting shades for men)
+  const BEST = {
+    female: ['#6e0f2d', '#c8102e', '#d6247a', '#e8701a', '#d1a21c', '#d4af37', '#1f8a4c', '#0f4d32', '#0b6e8c', '#127a78', '#2948a8', '#1a2547', '#5e2a84', '#b9a5dc', '#f2a3bd', '#f6b48f', '#f4ecd8', '#141414'],
+    male: ['#1a2547', '#36393f', '#141414', '#7d8087', '#c4c7cc', '#6b4428', '#b29d6c', '#d8c3a0', '#5a1a32', '#6e0f2d', '#2948a8', '#0f4d32', '#127a78', '#f4ecd8', '#f8f8f6'],
+    shirt: ['#f8f8f6', '#87c2e8', '#f2a3bd', '#a8dcc4', '#eadcb8', '#c4c7cc', '#b9a5dc', '#141414'],
+    tie: ['#6e0f2d', '#5a1a32', '#1a2547', '#2948a8', '#0f4d32', '#d1a21c', '#36393f', '#141414', '#c8102e']
+  };
+  let qcPart = null;
+  function renderQuickColors() {
+    const box = $('qcolors'); if (!box) return;
+    const od = outfitDef(), main = od.parts[0][0], lockBorder = !!(T.fabric && T.outfit === 'saree');
+    const parts = od.parts.filter(([k]) => !(lockBorder && k === 'border'));
+    if (!parts.find(([k]) => k === qcPart)) qcPart = main;
+    $('qcParts').innerHTML = parts.map(([k, n]) => `<button data-p="${k}" class="${k === qcPart ? 'on' : ''}">${n}</button>`).join('');
+    $('qcParts').querySelectorAll('button').forEach(b => b.onclick = () => { qcPart = b.dataset.p; renderQuickColors(); });
+    const fabricMain = T.fabric && qcPart === main;
+    let list = qcPart === 'shirt' || qcPart === 'top' ? BEST.shirt : qcPart === 'tie' ? BEST.tie.concat(T.outfit === 'shirt' ? ['none'] : []) : BEST[T.gender];
+    if (fabricMain) list = ['orig'].concat(list);
+    const cur = fabricMain ? (T.recolor || 'orig') : T.colors[qcPart];
+    $('qcSw').innerHTML = list.map(h => { const n = h === 'orig' ? 'Original' : colorName(h); const bg = h === 'orig' ? `url(${T.garImg.src}) center/cover` : h === 'none' ? 'repeating-linear-gradient(45deg,#ddd 0 5px,#fff 5px 10px)' : h;
+      return `<button data-h="${h}" class="${cur === h ? 'on' : ''}" aria-label="${n}" title="${n}" style="background:${bg}"><span>${n.split(' ')[0]}</span></button>`; }).join('');
+    $('qcNote').textContent = T.lastAI ? 'Each tap makes a new Real AI photo' + (lockBorder ? ' · border stays the same' : '') : 'Tap a colour, the look changes instantly' + (lockBorder ? ' · border stays the same' : '');
+    $('qcSw').querySelectorAll('button').forEach(b => b.onclick = async () => {
+      if (busy) return;
+      const h = b.dataset.h;
+      if (fabricMain) T.recolor = h === 'orig' ? null : h; else T.colors[qcPart] = h;
+      if (T.lastAI) { if (!aiReady()) { toast('Real AI needs your Google AI key'); return; } T.mode = 'ai'; }
+      else T.mode = 'quick';
+      box.classList.add('busyc'); T.single = true;
+      try { await generate(); } finally { T.single = false; box.classList.remove('busyc'); }
+    });
+  }
+
   function showResults(i, saved) {
+    $('qcolors').classList.toggle('hidden', !!saved); if (!saved) renderQuickColors();
     $('busy').classList.add('hidden'); $('resultWrap').classList.remove('hidden');
     $('resultImg').src = T.results[i].url; $('resultImg').dataset.i = i; $('saveNote').textContent = '';
     $('variants').innerHTML = T.results.length > 1 ? T.results.map((r, k) => `<img src="${r.url}" class="${k === i ? 'on' : ''}" data-k="${k}" alt="Look ${k + 1}">`).join('') : '';
@@ -350,13 +501,20 @@
     } finally { b.disabled = false; b.textContent = 'Save and check key'; }
   };
   $('btnAiRemove').onclick = async () => { if (await ask('Remove the Google AI key from this phone?')) { delete S.aiKey; save(); T.mode = 'quick'; renderAI(); } };
-  enter.settings = () => { renderAI(); $('acctInfo').textContent = `${S.role === 'owner' ? 'Shop owner' : 'Individual'} · +91 ${S.phone || ''} · verified ${S.verifiedAt ? new Date(S.verifiedAt).toLocaleDateString() : ''}`; $('btnEditShop').classList.toggle('hidden', S.role !== 'owner'); };
+  const applySecure = () => { if (window.AndroidBridge && AndroidBridge.setSecure) { try { AndroidBridge.setSecure(S.secureScreen !== false); } catch (e) {} } };
+  $('optStrict').onchange = e => { S.genderStrict = e.target.checked; save(); };
+  $('optSecure').onchange = e => { S.secureScreen = e.target.checked; save(); applySecure(); };
+  $('optAutoLock').onchange = e => { S.autoLock = e.target.checked; save(); };
+  $('btnChangePin').onclick = () => openPin(S.pin ? 'change' : 'create', 'settings');
+  enter.settings = () => { renderAI();
+    $('optStrict').checked = S.genderStrict !== false; $('optSecure').checked = S.secureScreen !== false; $('optAutoLock').checked = S.autoLock !== false;
+    $('optSecure').closest('label').classList.toggle('hidden', !(window.AndroidBridge && AndroidBridge.setSecure)); $('acctInfo').textContent = `${S.role === 'owner' ? 'Shop owner' : 'Individual'} · +91 ${S.phone || ''} · verified ${S.verifiedAt ? new Date(S.verifiedAt).toLocaleDateString() : ''}`; $('btnEditShop').classList.toggle('hidden', S.role !== 'owner'); };
   $('btnEditShop').onclick = () => go('shop');
   $('btnClearLooks').onclick = async () => { if (await ask('Delete all saved looks from this app?')) { S.looks = []; save(); toast('Looks deleted'); } };
-  $('btnReset').onclick = async () => { if (await ask('Sign out and remove all app data from this phone?')) { try { localStorage.removeItem(KEY); } catch (e) {} S = {}; T.src = null; T.P = null; applyTheme(); stack.length = 0; go('splash', false); } };
+  $('btnReset').onclick = async () => { if (await ask('Sign out and remove all app data from this phone?')) { try { localStorage.removeItem(KEY); } catch (e) {} if (NATIVE) { try { AndroidBridge.secureSet('aiKey', ''); } catch (e) {} secureKey = ''; } S = {}; unlocked = false; T.src = null; T.P = null; applyTheme(); stack.length = 0; go('splash', false); } };
 
   /* ---------- boot ---------- */
-  applyTheme(); loadShopLogo();
+  applyTheme(); loadShopLogo(); applySecure();
   loadImg('gundal.png').then(i => assets.gundal = i).catch(() => {});
   window.addEventListener('error', e => console.error('ATR error', e.message));
 }

@@ -193,7 +193,11 @@ with sync_playwright() as p:
         calls.append((req.method, url, body))
         hdr = {'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'content-type': 'application/json'}
         if req.method == 'OPTIONS': return route.fulfill(status=204, headers=hdr, body='')
-        if req.headers.get('x-goog-api-key') != 'AIzaTESTKEY0123456789abcdefghijklmnopq':
+        AQK = 'AQ.TestAuthKey_0123456789abcdefghijklmnopqrstuvwxyz'
+        if req.headers.get('x-goog-api-key') == AQK:  # new auth keys: some accounts reject header auth
+            return route.fulfill(status=401, headers=hdr, body=json.dumps({'error': {'message': 'Request had invalid authentication credentials.', 'status': 'UNAUTHENTICATED', 'details': [{'reason': 'ACCESS_TOKEN_TYPE_UNSUPPORTED'}]}}))
+        if 'key=' + AQK.replace('.', '.') in url and 'x-goog-api-key' not in req.headers: pass
+        elif req.headers.get('x-goog-api-key') != 'AIzaTESTKEY0123456789abcdefghijklmnopq':
             return route.fulfill(status=400, headers=hdr, body=json.dumps({'error': {'message': 'API key not valid. Please pass a valid API key.', 'status': 'INVALID_ARGUMENT'}}))
         if '/models?' in url: return route.fulfill(status=200, headers=hdr, body=json.dumps({'models': [{'name': 'models/gemini-2.5-flash-image'}]}))
         m = mode['v']
@@ -233,6 +237,8 @@ with sync_playwright() as p:
     check('wrong key reported by Google is refused', 'not valid' in pg.inner_text('#aiErr'))
     pg.fill('#aiKey', ' AIzaTESTKEY0123456789abcdefghijklmnopq '); pg.click('#btnAiSave'); pg.wait_for_function("ATR.state().aiKey")
     check('valid key saved and shown as ready', 'Ready' in pg.inner_text('#aiStatus') and pg.input_value('#aiKey') == '')
+    pg.fill('#aiKey', 'AQ.TestAuthKey_0123456789abcdefghijklmnopqrstuvwxyz'); pg.click('#btnAiSave'); pg.wait_for_function("(ATR.state().aiKey||'').startsWith('AQ.')", timeout=15000)
+    check('new-format AQ. key accepted (retries with ?key= after 401)', 'Ready' in pg.inner_text('#aiStatus') and any('key=AQ.' in c[1] for c in calls))
     pg.click('.chip[data-q=better]'); check('quality choice saved', pg.evaluate("ATR.state().aiQuality") == 'better'); pg.click('.chip[data-q=standard]')
     pg.click('#s-settings [data-back]'); check('back to showroom step', act() == 's-bg')
     pg.click('#modeAI'); shot('ai_01_mode')
@@ -253,6 +259,7 @@ with sync_playwright() as p:
     check('request sends the customer photo', sum(1 for x in parts if 'inline_data' in x) == 1)
     check('prompt asks to keep the same face and drape a Nivi saree', 'same real person' in prompt and 'Nivi' in prompt and 'maroon silk' in prompt.lower())
     check('uses Gemini 2.5 Flash Image for Standard', 'gemini-2.5-flash-image:generateContent' in posts[0][1])
+    check('AI photo works with the AQ. key', any('key=AQ.' in c[1] and ':generateContent' in c[1] for c in calls))
     check('"Try again" shown, neckline slider hidden for AI', pg.is_visible('#btnAgain') and not pg.is_visible('#neckAdj'))
 
     to_bg('female', photo='cust_female_plain.jpg', outfit='saree', fabric='saree_red_butti.jpg', cam=True)

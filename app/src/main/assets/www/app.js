@@ -326,7 +326,7 @@
     const k = $('aiKey').value.trim().replace(/\s+/g, '');
     $('aiErr').textContent = '';
     if (!k && aiReady()) { toast('Key already saved'); return; }
-    if (!/^[A-Za-z0-9_\-]{30,60}$/.test(k)) { $('aiErr').textContent = 'That does not look like a Google AI key. It usually starts with AIza and is about 39 characters.'; return; }
+    if (!/^[A-Za-z0-9_.\-]{30,200}$/.test(k)) { $('aiErr').textContent = 'That does not look like a Google AI key. New keys start with AQ. and older keys start with AIza.'; return; }
     const b = $('btnAiSave'); b.disabled = true; b.textContent = 'Checking key…';
     try {
       const r = await AI.testKey(k);

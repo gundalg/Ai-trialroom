@@ -31,6 +31,16 @@ const AI = (() => {
     finally { clearTimeout(to); }
   }
 
+  async function call(method, url, key, headers, body, timeoutMs) {
+    const h = Object.assign({}, headers, { 'x-goog-api-key': key });
+    let res = await http(method, url, h, body, timeoutMs);
+    if (res.status === 401 || (res.status === 403 && /ACCESS_TOKEN_TYPE_UNSUPPORTED|OAuth/i.test(res.body))) {
+      const h2 = Object.assign({}, headers); delete h2['x-goog-api-key'];
+      res = await http(method, url + (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(key), h2, body, timeoutMs);
+    }
+    return res;
+  }
+
   /* ---------- response helpers ---------- */
   function findImage(o, depth = 0) {
     if (!o || typeof o !== 'object' || depth > 12) return null;
@@ -50,7 +60,7 @@ const AI = (() => {
   function explain(res) {
     const j = parseJSON(res.body) || {}, err = j.error || {}, msg = (err.message || '') + ' ' + (err.status || '');
     if (res.status === 0) return new AIError(res.error === 'timeout' ? 'The AI took too long to answer. Please check the internet and try again.' : 'No internet connection. Please connect to the internet and try again.', 'net');
-    if (/API key not valid|API_KEY_INVALID|invalid api key/i.test(msg) || (res.status === 400 && /key/i.test(msg))) return new AIError('The Google AI key is not valid. Please check it in Settings.', 'key');
+    if (/API key not valid|API_KEY_INVALID|invalid api key|ACCESS_TOKEN_TYPE_UNSUPPORTED|invalid authentication/i.test(msg) || res.status === 401 || (res.status === 400 && /key/i.test(msg))) return new AIError('The Google AI key is not valid. Please check it in Settings.', 'key');
     if (res.status === 403) return new AIError('Google refused the request. Please make sure billing is turned on for your Google AI key.', 'billing');
     if (res.status === 429) return new AIError('The Google AI limit is reached. Turn on billing for your key or try again in a minute.', 'quota');
     if (res.status === 404) return new AIError('Model not available', 'model');
@@ -69,12 +79,12 @@ const AI = (() => {
     const parts = [{ text: prompt }].concat(images.map(im => ({ inline_data: { mime_type: im.mime, data: im.data } })));
     const body = { contents: [{ role: 'user', parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } };
     if (withConfig) body.generationConfig.imageConfig = { aspectRatio: '3:4' };
-    return http('POST', `${BASE}/models/${model}:generateContent`, { 'Content-Type': 'application/json', 'x-goog-api-key': key }, JSON.stringify(body));
+    return call('POST', `${BASE}/models/${model}:generateContent`, key, { 'Content-Type': 'application/json' }, JSON.stringify(body));
   }
   async function viaInteractions(key, model, prompt, images) {
     const input = [{ type: 'text', text: prompt }].concat(images.map(im => ({ type: 'image', mime_type: im.mime, data: im.data })));
     const body = { model, input, response_format: { type: 'image', aspect_ratio: '3:4', image_size: '1K' } };
-    return http('POST', `${BASE}/interactions`, { 'Content-Type': 'application/json', 'x-goog-api-key': key, 'Api-Revision': '2026-05-20' }, JSON.stringify(body));
+    return call('POST', `${BASE}/interactions`, key, { 'Content-Type': 'application/json', 'Api-Revision': '2026-05-20' }, JSON.stringify(body));
   }
 
   async function generate(key, quality, prompt, images, onStep) {
@@ -105,7 +115,7 @@ const AI = (() => {
   }
 
   async function testKey(key) {
-    const res = await http('GET', `${BASE}/models?pageSize=50`, { 'x-goog-api-key': key }, '', 30000);
+    const res = await call('GET', `${BASE}/models?pageSize=50`, key, {}, '', 30000);
     if (res.status === 200) { const j = parseJSON(res.body) || {}; const names = (j.models || []).map(m => m.name || ''); return { ok: true, image: names.some(n => /image|banana/.test(n)) }; }
     const e = explain(res); return { ok: false, message: e.code === 'model' ? 'The key could not be checked.' : e.message };
   }

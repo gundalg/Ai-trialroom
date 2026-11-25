@@ -8,6 +8,12 @@ const GENDER = (() => {
     ready = (async () => {
       if (typeof faceapi === 'undefined') return false;
       try {
+        // Use the graphics chip when the phone allows it, otherwise the normal processor (always works, a bit slower)
+        const tf = faceapi.tf;
+        let ok = false;
+        try { ok = await tf.setBackend('webgl'); if (ok) { await tf.ready(); tf.tidy(() => tf.add(tf.scalar(1), tf.scalar(1)).dataSync()); } } catch (e) { ok = false; }
+        if (!ok) { await tf.setBackend('cpu'); await tf.ready(); }
+        GENDER.backend = tf.getBackend();
         await faceapi.nets.tinyFaceDetector.loadFromUri('fa');
         await faceapi.nets.ageGenderNet.loadFromUri('fa');
         return true;
@@ -39,7 +45,11 @@ const GENDER = (() => {
       const area = x => x.detection.box.width * x.detection.box.height;
       const main = d.slice().sort((a, b) => area(b) - area(a))[0];
       return { face: true, gender: main.gender, p: main.genderProbability, faces: d.length };
-    } catch (e) { console.warn('gender check failed', e && e.message); return { error: true }; }
+    } catch (e) {
+      console.warn('gender check failed', e && e.message);
+      if (faceapi.tf.getBackend() !== 'cpu' && !img.__retried) { img.__retried = true; await faceapi.tf.setBackend('cpu'); await faceapi.tf.ready(); GENDER.backend = 'cpu'; return check(img); }
+      return { error: true };
+    }
   }
   return { load, check, disabled: false };
 })();

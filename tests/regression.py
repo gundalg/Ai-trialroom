@@ -105,7 +105,7 @@ with sync_playwright() as p:
         check(f'male photo · {o} · {mbgs[i]}', d == [900, 1200], d)
 
     # sarees with fabric photos + colour swatches + 4-look comparison
-    d, n = trial('female', photo='cust_female_plain.jpg', outfit='saree', fabric='saree_red_butti.jpg', colors={'border': '#d4af37', 'blouse': '#127a78'}, bg='silk', multi=True, tag='saree_fabric_red')
+    d, n = trial('female', photo='cust_female_plain.jpg', outfit='saree', fabric='saree_red_butti.jpg', colors={'blouse': '#127a78'}, bg='silk', multi=True, tag='saree_fabric_red')
     check('saree from fabric photo + 3 comparison looks', d == [900, 1200] and n == 4, (d, n))
     d, n = trial('female', photo='cust_female_plain.jpg', outfit='saree', fabric='saree_green_check.jpg', bg='bridal', tag='saree_fabric_green')
     check('saree green check fabric', d == [900, 1200])
@@ -144,7 +144,7 @@ with sync_playwright() as p:
     check('works without AI segmentation (fallback)', d == [900, 1200])
     pg.evaluate("TR.disableAI=false")
 
-    import base64; B64 = base64.b64encode(open(fx('cust_female_plain.jpg'), 'rb').read()).decode()
+    import base64; import base64 as _b64; B64 = base64.b64encode(open(fx('cust_female_plain.jpg'), 'rb').read()).decode()
     # face preservation: pixels above the neckline must equal the original photo
     diff = pg.evaluate("""(async()=>{
       const img=await new Promise(r=>{const i=new Image();i.onload=()=>r(i);i.src='data:image/jpeg;base64,'+%s});
@@ -284,6 +284,44 @@ with sync_playwright() as p:
     mode['v'] = 'ok'; pg.click('#btnGenerate'); pg.wait_for_selector('#resultWrap:not(.hidden)', timeout=30000); check('Quick preview still works', pg.is_visible('#neckAdj'))
     pg.click('#btnSettings') if act() == 's-home' else None
     pg.evaluate("ATR.back()"); pg.evaluate("ATR.back()")
+
+
+    # ---------- Saree photo: change colour, border stays the same ----------
+    FAB = _b64.b64encode(open(fx('saree_red_butti.jpg'), 'rb').read()).decode()
+    bt = pg.evaluate("""(async()=>{const i=await new Promise(r=>{const m=new Image();m.onload=()=>r(m);m.src='data:image/jpeg;base64,%s'});
+       const t=TR.borderTile(i); if(!t) return null; const [r,g,b]=[1,3,5].map(k=>parseInt(t.avg.slice(k,k+2),16)); return {r,g,b,w:t.width,h:t.height};})()""" % FAB)
+    check('finds the gold border in the saree photo', bt and bt['r'] > 180 and bt['g'] > 140 and bt['b'] < 130 and bt['w'] > bt['h'] * 4, bt)
+    same = pg.evaluate("""(async()=>{const L=s=>new Promise(r=>{const m=new Image();m.onload=()=>r(m);m.src='data:image/jpeg;base64,'+s});
+       const fab=await L('%s'), per=await L('%s'); const P=await TR.preparePerson({img:per});
+       const tile=TR.photoTile(fab), border=TR.borderTile(fab), g=P.g, bodyH=g.footY-g.neckY;
+       const mk=rc=>TR.compose(P,{outfit:'saree',colors:{body:'x',border:'#000000',blouse:'#d4af37'},fabric:rc?TR.recolorTile(tile,rc):tile,fabricAvg:rc||'#aa1428',photoPart:'body',borderTile:border,bg:'studio',theme:'maroon',shop:null,label:''},{}).getContext('2d');
+       const a=mk(null), b=mk('#1a2547');
+       const diff=(x0,y0,w,h)=>{const p=a.getImageData(x0,y0,w,h).data,q=b.getImageData(x0,y0,w,h).data;let d=0;for(let i=0;i<p.length;i+=4)d+=Math.abs(p[i]-q[i])+Math.abs(p[i+1]-q[i+1])+Math.abs(p[i+2]-q[i+2]);return d/(p.length/4)};
+       const bot=g.footY+bodyH*0.01, bw=bodyH*0.055;
+       return {border:diff(Math.round(g.cx-g.hipHalf*0.4),Math.round(bot-bw*0.75),Math.round(g.hipHalf*0.8),Math.max(2,Math.round(bw*0.4))),
+               body:diff(Math.round(g.cx+g.hipHalf*0.62),Math.round(g.hipY+bodyH*0.12),Math.round(g.hipHalf*0.3),Math.round(bodyH*0.08))};})()""" % (FAB, B64))
+    check('changing saree colour keeps the border identical', same['border'] < 12 and same['body'] > 60, same)
+
+    pg.evaluate("ATR.state().aiKey=null"); pg.evaluate("ATR.temp().mode='quick'")
+    if act() != 's-home': pg.evaluate("ATR.back()")
+    to_bg('female', photo='cust_female_plain.jpg', outfit='saree', fabric='saree_red_butti.jpg')
+    pg.click('#s-bg [data-back]')
+    check('border shows as locked to the photo', 'same as photo' in pg.inner_text('.part[data-p=border]'))
+    pg.click('.part[data-p=border]'); check('no colour squares for the locked border', pg.is_hidden('#swatches') and 'border stays exactly' in pg.inner_text('#colorHint'))
+    pg.click('.part[data-p=body]'); check('saree colour offers "Original" plus colours', pg.is_visible('.sw[data-h=orig]'))
+    pg.click('.sw[data-h="#1a2547"]'); check('saree recoloured, photo kept', pg.evaluate("ATR.temp().recolor") == '#1a2547' and pg.evaluate("!!ATR.temp().fabric"))
+    shot('recolor_01_colours')
+    if not pg.is_checked('#multi'): pg.click('#multi')
+    pg.click('#btnColorsNext'); pg.click('.bgc[data-b=silk]'); pg.click('#modeQuick'); pg.click('#btnGenerate'); pg.wait_for_selector('#resultWrap:not(.hidden)', timeout=60000)
+    labels = pg.evaluate("ATR.temp().results.map(r=>r.label)")
+    check('4 looks, all with the same border', len(labels) == 4 and all('same border' in l for l in labels) and 'Navy' in labels[0], labels)
+    shot('recolor_02_result')
+    pg.evaluate("ATR.state().aiKey='AQ.TestAuthKey_0123456789abcdefghijklmnopqrstuvwxyz'")
+    pg.click('#btnEdit'); pg.click('#btnOutfitNext'); pg.click('#btnColorsNext'); pg.click('#modeAI')
+    calls.clear(); mode['v'] = 'ok'; pg.click('#btnGenerate'); pg.wait_for_selector('#resultWrap:not(.hidden)', timeout=30000)
+    pr = json.loads([c for c in calls if c[0] == 'POST' and c[2]][0][2])['contents'][0]['parts'][0]['text']
+    check('AI told: change only body colour to navy, keep border exactly', 'ONLY its main body colour changed to navy' in pr and 'border must match the saree photo exactly' in pr)
+    check('AI result labelled "same border"', 'same border' in pg.evaluate("ATR.temp().results[0].label"))
 
     # narrow phone layout: nothing wider than the screen
     pg.set_viewport_size({'width': 360, 'height': 740})

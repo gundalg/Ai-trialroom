@@ -271,6 +271,52 @@ const TR = (() => {
     const sw = img.width * 0.5, shh = img.height * 0.5, t = mk(300, 300);
     t.getContext('2d').drawImage(img, img.width * 0.25, img.height * 0.25, sw, shh, 0, 0, 300, 300); return t;
   }
+  // Find the saree's border strip in the photo: a band of rows (or columns) whose colour differs clearly
+  // from the body, not touching the photo edge (edges are usually background). Returns a horizontal strip canvas.
+  function borderTile(img) {
+    const sc = Math.min(1, 240 / Math.max(img.width, img.height)), w = Math.max(20, Math.round(img.width * sc)), h = Math.max(20, Math.round(img.height * sc));
+    const c = mk(w, h), x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(img, 0, 0, w, h);
+    const p = x.getImageData(0, 0, w, h).data, px = (i, j) => { const k = (j * w + i) * 4; return [p[k], p[k + 1], p[k + 2]]; };
+    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    let cc = [0, 0, 0], n = 0;
+    for (let j = Math.round(h * 0.3); j < h * 0.7; j++) for (let i = Math.round(w * 0.3); i < w * 0.7; i++) { const q = px(i, j); cc[0] += q[0]; cc[1] += q[1]; cc[2] += q[2]; n++; }
+    cc = cc.map(v => v / n);
+    const lineMeans = (horiz) => { const L = horiz ? h : w, A = horiz ? w : h, out = [];
+      for (let t = 0; t < L; t++) { let r = 0, g = 0, b = 0, m = 0; for (let a = Math.round(A * 0.1); a < A * 0.9; a++) { const q = horiz ? px(a, t) : px(t, a); r += q[0]; g += q[1]; b += q[2]; m++; } out.push([r / m, g / m, b / m]); }
+      return out; };
+    let best = null;
+    for (const horiz of [true, false]) {
+      const means = lineMeans(horiz), L = means.length; let s0 = 0;
+      for (let t = 1; t <= L; t++) {
+        const seg = means.slice(s0, t); const avg = seg.reduce((a, q) => [a[0] + q[0], a[1] + q[1], a[2] + q[2]], [0, 0, 0]).map(v => v / seg.length);
+        if (t === L || dist(means[t], avg) > 28) {
+          const len = t - s0, d = dist(avg, cc);
+          if (s0 > L * 0.015 && t < L * 0.985 && len >= L * 0.025 && len <= L * 0.25 && d > 55 && (s0 < L * 0.4 || t > L * 0.6)) {
+            const score = d * Math.min(len, L * 0.1); if (!best || score > best.score) best = { score, horiz, a: s0 / L, b: t / L };
+          }
+          s0 = t;
+        }
+      }
+    }
+    if (!best) return null;
+    let out;
+    if (best.horiz) { const y0 = best.a * img.height, hh = (best.b - best.a) * img.height, sw = img.width * 0.8; out = mk(Math.round(Math.min(900, sw)), Math.max(8, Math.round(hh * Math.min(900, sw) / sw))); out.getContext('2d').drawImage(img, img.width * 0.1, y0, sw, hh, 0, 0, out.width, out.height); }
+    else { const x0 = best.a * img.width, ww = (best.b - best.a) * img.width, sh = img.height * 0.8, L = Math.round(Math.min(900, sh)), T = Math.max(8, Math.round(ww * L / sh)); out = mk(L, T); const o = out.getContext('2d'); o.translate(L, 0); o.rotate(Math.PI / 2); o.drawImage(img, x0, img.height * 0.1, ww, sh, 0, 0, T, L); }
+    out.avg = avgColor(out); return out;
+  }
+  // Recolour the body fabric to a new colour while keeping its weave and motifs (light/dark pattern).
+  function recolorTile(tile, hex) {
+    const t = mk(tile.width, tile.height), x = t.getContext('2d', { willReadFrequently: true }); x.drawImage(tile, 0, 0);
+    const d = x.getImageData(0, 0, t.width, t.height), p = d.data, [R, G, B] = hex2rgb(hex); let M = 0;
+    for (let i = 0; i < p.length; i += 4) M += 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+    M = Math.max(1, M / (p.length / 4));
+    for (let i = 0; i < p.length; i += 4) {
+      const r = Math.max(0.35, Math.min(2.2, (0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]) / M));
+      if (r <= 1) { p[i] = R * r; p[i + 1] = G * r; p[i + 2] = B * r; }
+      else { const k = Math.min(1, (r - 1) * 0.8); p[i] = R + (255 - R) * k; p[i + 1] = G + (255 - G) * k; p[i + 2] = B + (255 - B) * k; }
+    }
+    x.putImageData(d, 0, 0); return t;
+  }
   function avgColor(c) { const x = mk(8, 8), y = x.getContext('2d', { willReadFrequently: true }); y.drawImage(c, 0, 0, 8, 8); const p = y.getImageData(0, 0, 8, 8).data; let r = 0, g = 0, b = 0; for (let i = 0; i < p.length; i += 4) { r += p[i]; g += p[i + 1]; b += p[i + 2]; } return rgb2hex(r / 64, g / 64, b / 64); }
 
   /* ---------- garment drawing ---------- */
@@ -282,6 +328,11 @@ const TR = (() => {
     ctx.restore();
   }
   function zari(ctx, x, y, w, h, col) {
+    if (col && col.tagName === 'CANVAS') { // border taken from the customer's saree photo: draw it as it is
+      const s = Math.max(h, 4) / col.height, t = mk(Math.max(4, Math.round(col.width * s)), Math.max(4, Math.round(h)));
+      t.getContext('2d').drawImage(col, 0, 0, t.width, t.height);
+      ctx.save(); ctx.translate(x, y); ctx.fillStyle = ctx.createPattern(t, 'repeat-x'); ctx.fillRect(0, 0, w, h); ctx.restore(); return;
+    }
     ctx.fillStyle = col; ctx.fillRect(x, y, w, h);
     const gold = lum(col) > 0.55 ? shade(col, -0.35) : '#e6c45a';
     ctx.fillStyle = gold; ctx.fillRect(x, y + h * 0.12, w, Math.max(1.5, h * 0.06)); ctx.fillRect(x, y + h * 0.82, w, Math.max(1.5, h * 0.06));
@@ -385,12 +436,12 @@ const TR = (() => {
       f.lineTo(cx - hHalf * flare, bot); f.quadraticCurveTo(cx, bot + bodyH * 0.02, cx + hHalf * flare, bot); f.lineTo(cx + hHalf, hipY + bodyH * 0.05); f.quadraticCurveTo(cx + hHalf * 1.05, hipY, cx + wHalf, top); f.closePath();
       f.fillStyle = fabricFill(f, part, st); f.fill();
       f.save(); f.clip();
-      const bw = bodyH * (o === 'saree' ? 0.055 : 0.07), bc = o === 'gown' ? null : C(st, o === 'saree' ? 'border' : 'blouse');
+      const bw = bodyH * (o === 'saree' ? 0.055 : 0.07), bc = o === 'gown' ? null : (o === 'saree' && st.borderTile) ? st.borderTile : C(st, o === 'saree' ? 'border' : 'blouse');
       if (bc) zari(f, cx - hHalf * flare - 10, bot - bw, hHalf * flare * 2 + 20, bw + 10, bc);
       // pleats / gathers
       const n = o === 'saree' ? 7 : 14, px0 = o === 'saree' ? cx - hHalf * 0.55 : cx - hHalf * flare, pw = o === 'saree' ? hHalf * 0.9 : hHalf * flare * 2;
       for (let i = 0; i < n; i++) { const x = px0 + i * pw / n; const gr = f.createLinearGradient(x, 0, x + pw / n, 0); gr.addColorStop(0, 'rgba(0,0,0,.20)'); gr.addColorStop(.5, 'rgba(255,255,255,.10)'); gr.addColorStop(1, 'rgba(0,0,0,.05)'); f.fillStyle = gr; f.fillRect(x, o === 'saree' ? hipY : top, pw / n, bot - top); }
-      if (o === 'saree' && bc) for (let i = 0; i < n; i++) zari(f, px0 + i * pw / n, bot - bw, pw / n - 2, bw, shade(bc, i % 2 ? -0.08 : 0));
+      if (o === 'saree' && bc) for (let i = 0; i < n; i++) zari(f, px0 + i * pw / n, bot - bw, pw / n - 2, bw, typeof bc === 'string' ? shade(bc, i % 2 ? -0.08 : 0) : bc);
       f.restore();
       f.strokeStyle = 'rgba(0,0,0,.25)'; f.lineWidth = 3; f.beginPath(); f.moveTo(cx - wHalf, top); f.lineTo(cx + wHalf, top); f.stroke();
       // blouse / bodice
@@ -407,7 +458,7 @@ const TR = (() => {
       }
       if (o === 'saree') {
         // pallu over the left shoulder (viewer's right), across chest to the opposite waist
-        const pw2 = sh * 0.95, fill = fabricFill(u, 'body', st), bc2 = C(st, 'border');
+        const pw2 = sh * 0.95, fill = fabricFill(u, 'body', st), bc2 = st.borderTile || C(st, 'border');
         band(u, cx + sh * 0.72, shY - sh * 0.05, cx - g.waistHalf * 1.25, waistY + bodyH * 0.06, pw2, fill, bc2, pw2 * 0.2);
         band(u, cx + sh * 0.85, shY - sh * 0.02, cx + sh * 1.0, hipY + bodyH * 0.06, pw2 * 0.7, fill, bc2, pw2 * 0.16);
         u.fillStyle = 'rgba(0,0,0,.12)'; band(u, cx + sh * 0.72, shY + sh * 0.25, cx - g.waistHalf * 1.25, waistY + bodyH * 0.09, pw2 * 0.12, 'rgba(0,0,0,.12)');
@@ -524,5 +575,5 @@ const TR = (() => {
     brand(o, st, assets); return out;
   }
 
-  return { brandImage, W, H, PALETTE, OUTFITS, CODES, BGS, SKINS, drawBg, drawModel, preparePerson, compose, photoTile, avgColor, mk, disableAI: false, _geometryFromMask: geometryFromMask };
+  return { brandImage, W, H, PALETTE, OUTFITS, CODES, BGS, SKINS, drawBg, drawModel, preparePerson, compose, photoTile, borderTile, recolorTile, avgColor, mk, disableAI: false, _geometryFromMask: geometryFromMask };
 })();

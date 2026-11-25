@@ -167,24 +167,37 @@
     $('garPrev').classList.toggle('hidden', !T.garImg); $('garHint').classList.toggle('hidden', !!T.garImg); $('garClear').classList.toggle('hidden', !T.garImg); if (T.garImg) $('garPrev').src = T.garImg.src;
   };
   const onGarment = async e => {
-    try { const d = await readFile(e.target.files[0]); const ds = await downscale(d, 1200, 0.9); T.garImg = await loadImg(ds.url); T.fabric = TR.photoTile(T.garImg); T.fabricAvg = TR.avgColor(T.fabric); enter.outfit(); toast('Fabric added'); }
+    try { const d = await readFile(e.target.files[0]); const ds = await downscale(d, 1200, 0.9); T.garImg = await loadImg(ds.url); T.fabric = TR.photoTile(T.garImg); T.fabricAvg = TR.avgColor(T.fabric); T.recolor = null; T.borderTile = TR.borderTile(T.garImg); enter.outfit(); toast(T.outfit === 'saree' && T.borderTile ? 'Saree added · border found ✓' : 'Fabric added'); }
     catch (err) { toast(err.message); } e.target.value = '';
   };
   $('garFile').onchange = onGarment; $('garCam').onchange = onGarment;
-  $('garClear').onclick = () => { T.garImg = null; T.fabric = null; enter.outfit(); };
+  $('garClear').onclick = () => { T.garImg = null; T.fabric = null; T.recolor = null; T.borderTile = null; enter.outfit(); };
   $('btnOutfitNext').onclick = () => go('colors');
 
   /* ---------- colours ---------- */
   function ensureColors() { for (const [k, , d] of outfitDef().parts) if (!T.colors[k]) T.colors[k] = d; }
   enter.colors = () => {
     ensureColors(); const parts = outfitDef().parts; if (!parts.find(p => p[0] === T.part)) T.part = parts[0][0];
-    $('parts').innerHTML = parts.map(([k, n]) => { const fromPhoto = T.fabric && k === parts[0][0]; const c = T.colors[k]; return `<button class="part ${k === T.part ? 'on' : ''}" data-p="${k}"><i style="background:${fromPhoto ? `url(${T.garImg.src}) center/cover` : c === 'none' ? 'repeating-linear-gradient(45deg,#ddd 0 4px,#fff 4px 8px)' : c}"></i>${n}${fromPhoto ? ' (photo)' : ''}</button>`; }).join('');
+    const main = parts[0][0], lockBorder = !!(T.fabric && T.outfit === 'saree'), locked = k => lockBorder && k === 'border';
+    $('parts').innerHTML = parts.map(([k, n]) => {
+      const fromPhoto = T.fabric && k === main, c = T.colors[k];
+      const bg = locked(k) ? (T.borderTile ? `url(${T.borderTile.toDataURL('image/jpeg', 0.8)}) center/cover` : `url(${T.garImg.src}) center bottom/cover`)
+        : fromPhoto ? (T.recolor ? T.recolor : `url(${T.garImg.src}) center/cover`) : c === 'none' ? 'repeating-linear-gradient(45deg,#ddd 0 4px,#fff 4px 8px)' : c;
+      const tag = locked(k) ? ' (same as photo 🔒)' : fromPhoto ? (T.recolor ? ` (photo in ${colorName(T.recolor).toLowerCase()})` : ' (photo)') : '';
+      return `<button class="part ${k === T.part ? 'on' : ''}" data-p="${k}"><i style="background:${bg}"></i>${n}${tag}</button>`; }).join('');
     $('parts').querySelectorAll('.part').forEach(b => b.onclick = () => { T.part = b.dataset.p; enter.colors(); });
+    const isLocked = locked(T.part);
+    $('colorHint').textContent = isLocked ? 'The border stays exactly as in your saree photo. Change the saree colour and the border design does not change.'
+      : (T.fabric && T.part === main) ? 'Pick a colour to change only the saree body. The border, pallu and design stay the same as your photo.' : '';
     const sw = TR.PALETTE.slice(); if (T.part === 'tie' && T.outfit === 'shirt') sw.unshift(['No tie', 'none']);
-    $('swatches').innerHTML = sw.map(([n, h]) => `<button class="sw ${T.colors[T.part] === h ? 'on' : ''}" data-h="${h}" title="${n}" aria-label="${n}" style="background:${h === 'none' ? 'repeating-linear-gradient(45deg,#ddd 0 6px,#fff 6px 12px)' : h}"><span>${n}</span></button>`).join('');
+    if (T.fabric && T.part === main) sw.unshift(['Original', 'orig']);
+    const cur = (T.fabric && T.part === main) ? (T.recolor || 'orig') : T.colors[T.part];
+    $('swatches').classList.toggle('hidden', isLocked);
+    $('swatches').innerHTML = sw.map(([n, h]) => `<button class="sw ${cur === h ? 'on' : ''}" data-h="${h}" title="${n}" aria-label="${n}" style="background:${h === 'none' ? 'repeating-linear-gradient(45deg,#ddd 0 6px,#fff 6px 12px)' : h === 'orig' ? `url(${T.garImg.src}) center/cover` : h}"><span>${n}</span></button>`).join('');
     $('swatches').querySelectorAll('.sw').forEach(b => b.onclick = () => {
-      if (T.fabric && T.part === parts[0][0]) { T.fabric = null; T.garImg = null; toast('Using colour instead of the photo'); }
-      T.colors[T.part] = b.dataset.h; enter.colors();
+      if (T.fabric && T.part === main) T.recolor = b.dataset.h === 'orig' ? null : b.dataset.h;
+      else T.colors[T.part] = b.dataset.h;
+      enter.colors();
     });
     $('multi').checked = T.multi;
   };
@@ -218,16 +231,17 @@
   };
 
   /* ---------- generate ---------- */
-  function labelFor(colors) {
-    const od = outfitDef(), main = od.parts[0][0];
-    const bits = od.parts.slice(0, 2).map(([k, n], i) => (i === 0 && T.fabric) ? 'your fabric' : (i === 0 ? colorName(colors[k]) : `${colorName(colors[k])} ${n.toLowerCase()}`));
+  function labelFor(colors, rc) {
+    const od = outfitDef();
+    if (T.fabric) { const what = T.outfit === 'saree' ? 'your saree' : 'your fabric'; return `${od.name} · ${what}${rc ? ' in ' + colorName(rc) : ''}${T.outfit === 'saree' ? ' · same border' : ''}`; }
+    const bits = od.parts.slice(0, 2).map(([k, n], i) => i === 0 ? colorName(colors[k]) : `${colorName(colors[k])} ${n.toLowerCase()}`);
     return `${od.name} · ${bits.join(' · ')}`;
   }
   function variants() {
     ensureColors(); const main = outfitDef().parts[0][0];
-    const list = [Object.assign({}, T.colors)];
+    const list = [Object.assign({}, T.colors, T.fabric ? { [main]: T.recolor || 'orig' } : {})];
     if (T.multi) {
-      const cur = T.colors[main], picks = ['#6e0f2d', '#1a2547', '#127a78', '#d6247a', '#36393f', '#d4af37', '#2948a8', '#c8102e', '#f4ecd8', '#0f4d32'].filter(c => c !== cur);
+      const cur = T.fabric ? T.recolor : T.colors[main], picks = ['#6e0f2d', '#1a2547', '#127a78', '#d6247a', '#36393f', '#d4af37', '#2948a8', '#c8102e', '#f4ecd8', '#0f4d32'].filter(c => c !== cur);
       for (let i = 0; i < 3; i++) list.push(Object.assign({}, T.colors, { [main]: picks[(i * 3 + (T.gender === 'male' ? 1 : 0)) % picks.length] }));
     }
     return list;
@@ -244,12 +258,11 @@
       if (T.src.img) images.push({ mime: 'image/jpeg', data: b64(T.src.img, 1536) });
       if (T.garImg) images.push({ mime: 'image/jpeg', data: b64(T.garImg, 1280) });
       const model = T.src.model ? { skinIndex: TR.SKINS.indexOf(T.src.model.skin) } : null;
-      const prompt = AI.buildPrompt({ outfit: T.outfit, colorNames: names, hasFabric: !!T.garImg, bg: T.bg, model, gender: T.gender });
+      const prompt = AI.buildPrompt({ outfit: T.outfit, colorNames: names, hasFabric: !!T.garImg, recolorName: (T.garImg && T.recolor) ? colorName(T.recolor).toLowerCase() : null, bg: T.bg, model, gender: T.gender });
       let n = 0; const tick = setInterval(() => { n++; $('busyTxt').textContent = ['Removing anything that is not the fabric…', 'Draping the outfit on the photo…', 'Matching light and folds…', 'Placing you in the showroom…', 'Almost ready…'][Math.min(4, Math.floor(n / 4))] + ` (${n * 2}s)`; }, 2000);
       let out; try { out = await AI.generate(S.aiKey, S.aiQuality || 'standard', prompt, images); } finally { clearInterval(tick); }
       const img = await loadImg(`data:${out.mime};base64,${out.data}`);
-      const st = { theme: S.theme, shop: S.role === 'owner' ? S.shop : null, label: labelFor(T.colors).replace('your fabric', 'your saree') + ' · Real AI' };
-      if (!T.garImg) st.label = st.label.replace(' · your saree', '');
+      const st = { theme: S.theme, shop: S.role === 'owner' ? S.shop : null, label: labelFor(T.colors, T.recolor) + ' · Real AI' };
       const c = TR.brandImage(img, st, assets);
       T.results = [{ url: c.toDataURL('image/jpeg', 0.92), label: st.label }]; T.lastAI = true;
       const mk = new Date().toISOString().slice(0, 7); if (!S.aiCount || S.aiCount.m !== mk) S.aiCount = { m: mk, n: 0 }; S.aiCount.n++; save();
@@ -273,8 +286,9 @@
       $('busyTxt').textContent = 'Dressing you up…'; await new Promise(r => setTimeout(r, 30));
       const vs = variants(); const od = outfitDef();
       T.results = vs.map(colors => {
-        const st = { outfit: T.outfit, colors: Object.assign({}, colors), fabric: (colors === vs[0]) ? T.fabric : null, fabricAvg: T.fabricAvg, photoPart: od.parts[0][0], bg: T.bg, neckAdj: T.neckAdj, theme: S.theme, shop: S.role === 'owner' ? S.shop : null };
-        st.label = labelFor(colors).replace('your fabric', st.fabric ? 'your fabric' : colorName(colors[od.parts[0][0]]));
+        const main = od.parts[0][0], rc = T.fabric && colors[main] !== 'orig' ? colors[main] : null;
+        const st = { outfit: T.outfit, colors: Object.assign({}, colors), fabric: T.fabric ? (rc ? TR.recolorTile(T.fabric, rc) : T.fabric) : null, fabricAvg: rc || T.fabricAvg, photoPart: main, bg: T.bg, neckAdj: T.neckAdj, theme: S.theme, shop: S.role === 'owner' ? S.shop : null, borderTile: (T.fabric && T.outfit === 'saree') ? T.borderTile : null };
+        st.label = labelFor(colors, rc);
         const c = TR.compose(T.P, st, assets); return { url: c.toDataURL('image/jpeg', 0.9), label: st.label };
       });
       const notes = { ai: 'AI body detection on', colour: 'plain-background detection', none: 'body outline estimated — use a plain background for best results', model: 'AI model' };

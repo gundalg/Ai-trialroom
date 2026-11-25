@@ -129,8 +129,10 @@ const AI = (() => {
     studio: 'a clean professional photo studio with a soft light-grey backdrop and even lighting',
     original: null
   };
-  function outfitText(o, c, hasFabric) {
-    const fab = 'EXACTLY the garment shown in the second image (same colours, motifs, weave, border and pallu/patterns)';
+  function outfitText(o, c, hasFabric, recolor) {
+    const fab = recolor
+      ? `the garment shown in the second image, with ONLY its main body colour changed to ${recolor}. Keep its border EXACTLY as in the photo — same border design, same border colours, same border width — and keep the pallu, motifs and weave pattern the same; only the plain body colour changes`
+      : 'EXACTLY the garment shown in the second image (same colours, motifs, weave, border and pallu/patterns)';
     switch (o) {
       case 'saree': return `a traditional Indian saree draped in the classic Nivi style — neat front pleats tucked at the waist, the pallu falling over the left shoulder — ${hasFabric ? 'using ' + fab : `in ${c.body} silk with a ${c.border} zari border`}, worn with a fitted short-sleeve blouse in ${c.blouse}`;
       case 'lehenga': return `an Indian bridal lehenga: a flared ${hasFabric ? 'skirt made from ' + fab : c.skirt + ' embroidered skirt'}, a ${c.blouse} choli blouse and a ${c.dupatta} net dupatta draped over one shoulder`;
@@ -150,7 +152,7 @@ const AI = (() => {
   }
   function buildPrompt(opt) {
     // opt: {outfit, colorNames, hasFabric, bg, model:{gender, skin}|null, gender}
-    const look = outfitText(opt.outfit, opt.colorNames, opt.hasFabric);
+    const look = outfitText(opt.outfit, opt.colorNames, opt.hasFabric, opt.recolorName);
     const bg = BG_TEXT[opt.bg];
     const lines = [];
     if (opt.model) {
@@ -164,6 +166,7 @@ const AI = (() => {
       lines.push(`Dress the customer from the first image in ${look}.`);
       lines.push('Keep the customer\'s face, facial features, expression, skin tone, hairstyle, body shape, height and pose exactly the same — it must clearly be the same real person. Change only the clothing' + (bg ? ' and the background.' : '.'));
     }
+    if (opt.hasFabric && opt.outfit === 'saree') lines.push('The saree border must match the saree photo exactly: same pattern, same colours, same width, running along the bottom hem and the pallu edge.');
     lines.push(bg ? `Background: ${bg}.` : 'Keep the original background exactly as it is.');
     lines.push('Photorealistic result with natural fabric drape, folds, shadows and lighting that match the scene. Show the full body from head to feet in a 3:4 portrait frame. Do not add any text, logos or watermarks.');
     return lines.join('\n');

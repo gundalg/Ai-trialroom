@@ -200,8 +200,10 @@ public class MainActivity extends Activity {
         });
 
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
+        if (staffTestExpired()) { showExpired(); return; }
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
         else web.loadUrl("https://" + HOST + "/index.html");
+        if (BuildConfig.STAFF_TEST) checkNetworkTime();
     }
 
     /** Opens the phone's gallery / photo picker directly. */
@@ -242,6 +244,60 @@ public class MainActivity extends Activity {
         File dir = new File(getCacheDir(), "captures");
         File[] fs = dir.listFiles();
         if (fs != null) for (File f : fs) { if (!f.delete()) f.deleteOnExit(); }
+    }
+
+    /* ---------- staff test version: stops after BuildConfig.TEST_EXPIRES (end of day, India time) ---------- */
+    private long expiryMillis() {
+        try {
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US);
+            f.setTimeZone(java.util.TimeZone.getTimeZone("Asia/Kolkata"));
+            java.util.Date d = f.parse(BuildConfig.TEST_EXPIRES + " 23:59:59");
+            return d == null ? 0 : d.getTime();
+        } catch (Exception e) { return 0; }   // unreadable date = treat as expired
+    }
+
+    /** Uses the latest time ever seen (phone clock, earlier runs, internet time), so winding the clock back does not help. */
+    private boolean staffTestExpired() {
+        if (!BuildConfig.STAFF_TEST) return false;
+        SharedPreferences g = getSharedPreferences("guard", MODE_PRIVATE);
+        long now = Math.max(System.currentTimeMillis(), Math.max(g.getLong("seen", 0), g.getLong("net", 0)));
+        g.edit().putLong("seen", now).apply();
+        return now > expiryMillis();
+    }
+
+    /** Reads the real date from Google's server (no data sent) and re-checks the expiry. */
+    private void checkNetworkTime() {
+        pool.execute(() -> {
+            HttpURLConnection c = null;
+            try {
+                c = (HttpURLConnection) new URL("https://generativelanguage.googleapis.com/").openConnection();
+                c.setRequestMethod("HEAD");
+                c.setConnectTimeout(8000);
+                c.setReadTimeout(8000);
+                c.getResponseCode();
+                long t = c.getDate();
+                if (t > 0) {
+                    SharedPreferences g = getSharedPreferences("guard", MODE_PRIVATE);
+                    if (t > g.getLong("net", 0)) g.edit().putLong("net", t).apply();
+                    if (staffTestExpired()) runOnUiThread(this::showExpired);
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (c != null) c.disconnect();
+            }
+        });
+    }
+
+    private void showExpired() {
+        if (web == null) return;
+        String html = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'></head>"
+                + "<body style=\"margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;"
+                + "font-family:sans-serif;background:#6e0f2d;color:#fff;padding:24px;box-sizing:border-box\"><div>"
+                + "<div style='font-size:52px'>&#9203;</div><h1 style='font-family:Georgia,serif;color:#f7dc8a'>This test version has ended</h1>"
+                + "<p style='font-size:17px;line-height:1.5'>AI TrialRoom TEST was for Gundal Business staff testing until "
+                + BuildConfig.TEST_EXPIRES + ".<br>Please uninstall it.</p>"
+                + "<p style='opacity:.8'>Gundal Business Pvt Ltd &middot; gundalg@gmail.com</p></div></body></html>";
+        web.loadDataWithBaseURL("https://" + HOST + "/expired", html, "text/html", "utf-8", null);
     }
 
     /** Debugger attached to a release build, or a known hooking tool (Frida / Xposed) loaded into the app. */
@@ -341,6 +397,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (BuildConfig.STAFF_TEST && web != null && staffTestExpired()) { showExpired(); return; }
         if (billing != null) billing.refresh();   // picks up a subscription bought, renewed or cancelled meanwhile
     }
 
@@ -399,6 +456,11 @@ public class MainActivity extends Activity {
     private class Bridge {
         @JavascriptInterface
         public boolean billingRequired() { return BuildConfig.PLAY_EDITION; }
+
+        @JavascriptInterface
+        public String staffInfo() {
+            return BuildConfig.STAFF_TEST ? "{\"test\":true,\"expires\":\"" + BuildConfig.TEST_EXPIRES + "\",\"expiresAt\":" + expiryMillis() + "}" : "{\"test\":false}";
+        }
 
         @JavascriptInterface
         public String billingStatus() {

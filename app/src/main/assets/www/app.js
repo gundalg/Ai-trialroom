@@ -553,6 +553,18 @@
 
   /* ---------- boot ---------- */
   applyTheme(); loadShopLogo(); applySecure();
+  // Staff test version: banner on every screen, watermark on every photo, reminder near the end date
+  const STAFF = (() => { try { return JSON.parse(AndroidBridge.staffInfo()); } catch (e) { return { test: false }; } })();
+  if (STAFF.test) {
+    TR.setStaff(true); document.body.classList.add('staff');
+    const ends = new Date(STAFF.expiresAt || (STAFF.expires + 'T23:59:59+05:30'));
+    const endTxt = ends.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+    const bar = document.createElement('div'); bar.className = 'staff-banner'; bar.id = 'staffBanner';
+    bar.textContent = `TEST VERSION · staff only · ends ${endTxt}`; document.body.appendChild(bar);
+    const tag = document.createElement('p'); tag.className = 'staff-tag'; tag.textContent = 'TEST VERSION · for Gundal Business staff only'; document.querySelector('.splash .tag').after(tag);
+    const days = Math.ceil((ends - Date.now()) / 86400000);
+    if (days <= 7 && days >= 0) setTimeout(() => toast(`This test version ends in ${days} day${days === 1 ? '' : 's'}`, 5000), 800);
+  }
   loadImg('gundal.png').then(i => assets.gundal = i).catch(() => {});
   window.addEventListener('error', e => console.error('ATR error', e.message));
 }

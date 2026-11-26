@@ -14,6 +14,13 @@ android {
         versionName = '1.0.' + vc
         // PLAY_EDITION=1 -> Google Play version (subscription required); otherwise test edition for direct install
         buildConfigField 'boolean', 'PLAY_EDITION', (System.getenv('PLAY_EDITION') == '1') ? 'true' : 'false'
+        // STAFF_TEST=1 -> staff test version: separate app ("AI TrialRoom TEST"), TEST marking, stops after TEST_EXPIRES
+        boolean staff = System.getenv('STAFF_TEST') == '1'
+        def expires = System.getenv('TEST_EXPIRES') ?: '2026-12-31'
+        buildConfigField 'boolean', 'STAFF_TEST', staff ? 'true' : 'false'
+        buildConfigField 'String', 'TEST_EXPIRES', '"' + expires + '"'
+        if (staff) applicationIdSuffix = '.stafftest'
+        manifestPlaceholders = [appLabel: staff ? 'AI TrialRoom TEST' : 'AI TrialRoom']
     }
 
     buildFeatures {
@@ -21,6 +28,14 @@ android {
     }
 
     signingConfigs {
+        // Fixed key for test builds only (not the Google Play upload key), so each new test version installs over the old one
+        debug {
+            storeFile file('staff-test-signing.p12')
+            storeType 'pkcs12'
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
         release {
             def ks = System.getenv('KEYSTORE_FILE')
             if (ks != null && !ks.isEmpty() && file(ks).exists()) {

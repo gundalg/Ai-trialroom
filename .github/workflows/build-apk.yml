@@ -61,6 +61,9 @@ jobs:
           # Test edition APK (direct install, no subscription needed)
           gradle assembleRelease --no-daemon --stacktrace
           mkdir -p dist && cp app/build/outputs/apk/release/app-release.apk dist/AI-TrialRoom-v1.0.${{ github.run_number }}.apk
+          # Staff test version: separate app "AI TrialRoom TEST", TEST marking, stops after 31 Dec 2026
+          STAFF_TEST=1 TEST_EXPIRES=2026-12-31 gradle assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk dist/AI-TrialRoom-STAFF-TEST-v1.0.${{ github.run_number }}.apk
           # Google Play edition bundle (.aab), unsigned here; signed with the private upload key before uploading
           PLAY_EDITION=1 NO_SIGN=1 gradle bundleRelease --no-daemon --stacktrace
           cp app/build/outputs/bundle/release/app-release.aab dist/AI-TrialRoom-Play-v1.0.${{ github.run_number }}-unsigned.aab

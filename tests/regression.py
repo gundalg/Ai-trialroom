@@ -496,6 +496,39 @@ with sync_playwright() as p:
     ctx2.close()
     check('test edition (direct install) never asks for a subscription', pg.evaluate("ATR.state().role") is not None and pg.query_selector('#s-paywall.active') is None)
 
+
+    # ---------- Staff test version: TEST banner, watermark, reminder ----------
+    check('normal version shows no TEST marking', pg.query_selector('#staffBanner') is None)
+    ctx3 = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2)
+    ctx3.add_init_script("""window.AndroidBridge={billingRequired:()=>false,staffInfo:()=>JSON.stringify({test:true,expires:'2026-12-31',expiresAt:(window.__exp||Date.parse('2026-12-31T23:59:59+05:30'))})};
+      window.addEventListener('DOMContentLoaded',()=>{ try { GENDER.disabled = true; } catch (e) {} });""")
+    s3 = ctx3.new_page(); s3.on('pageerror', lambda e: errors.append('pageerror(staff): ' + str(e)))
+    s3.goto(f'http://127.0.0.1:{PORT}/index.html'); s3.wait_for_load_state('networkidle')
+    check('staff version: banner on screen', s3.is_visible('#staffBanner') and 'TEST VERSION' in s3.inner_text('#staffBanner') and '31 Dec 2026' in s3.inner_text('#staffBanner'))
+    check('staff version: splash says TEST VERSION', 'TEST VERSION' in s3.inner_text('.splash'))
+    s3.screenshot(path=os.path.join(OUT, 'staff_01_splash.png'))
+    s3.click('#btnStart'); s3.click('#roleIndividual'); s3.fill('#phone', '9876500002'); s3.click('#btnSendOtp')
+    s3.fill('#otp', s3.evaluate("document.getElementById('otpNote').textContent.match(/\\d{6}/)[0]")); s3.wait_for_timeout(200)
+    for cb in s3.query_selector_all('.cbx'): cb.check()
+    s3.click('#btnAgree'); s3.fill('#pin1', PW); s3.fill('#pin2', PW); s3.click('#btnPin'); s3.wait_for_selector('#s-home.active')
+    check('staff version: no subscription screen', s3.evaluate("document.querySelector('.screen.active').id") == 's-home')
+    s3.click('#btnNewTrial'); s3.click('#gFemale'); s3.click('.model[data-i="1"]'); s3.click('#btnCustNext'); s3.wait_for_selector('#s-outfit.active')
+    s3.click('#btnOutfitNext'); s3.click('#btnColorsNext'); s3.click('#modeQuick'); s3.click('#btnGenerate'); s3.wait_for_selector('#resultWrap:not(.hidden)', timeout=60000)
+    check('staff version: banner does not cover the buttons', s3.evaluate("(()=>{const b=document.getElementById('btnFinish').getBoundingClientRect(),s=document.getElementById('staffBanner').getBoundingClientRect();window.scrollTo(0,document.body.scrollHeight);const b2=document.getElementById('btnFinish').getBoundingClientRect();return b2.bottom<=s.top+1})()"))
+    wm = s3.evaluate("""(async()=>{const P=await TR.preparePerson({model:{gender:'female',skin:TR.SKINS[0]}});
+      const st={outfit:'saree',colors:{body:'#6e0f2d',border:'#d4af37',blouse:'#d4af37'},bg:'studio',photoPart:'body',theme:'maroon',shop:null,label:''};
+      const a=TR.compose(P,st,{}).getContext('2d').getImageData(0,0,900,1200).data; TR.setStaff(false);
+      const b=TR.compose(P,st,{}).getContext('2d').getImageData(0,0,900,1200).data; TR.setStaff(true);
+      let d=0;for(let i=0;i<a.length;i+=4)if(Math.abs(a[i]-b[i])>8)d++;return d/(a.length/4);})()""")
+    check('staff version: every photo carries the TEST VERSION watermark', wm > 0.05, wm)
+    s3.screenshot(path=os.path.join(OUT, 'staff_02_result.png'), full_page=True)
+    ctx3.close()
+    ctx4 = b.new_context(viewport={'width': 390, 'height': 844})
+    ctx4.add_init_script("window.AndroidBridge={billingRequired:()=>false,staffInfo:()=>JSON.stringify({test:true,expires:'soon',expiresAt:Date.now()+3*86400000-3600000})};")
+    s4 = ctx4.new_page(); s4.goto(f'http://127.0.0.1:{PORT}/index.html'); s4.wait_for_timeout(1500)
+    check('staff version: reminder when 7 days or less remain', 'ends in 3 days' in s4.inner_text('#toast'))
+    ctx4.close()
+
     # ---------- every screen size: small phone, phone, tablet, computer ----------
     for w, h, tag in [(320, 640, 'phone_small'), (390, 844, 'phone'), (800, 1280, 'tablet'), (1366, 768, 'computer'), (844, 390, 'phone_landscape')]:
         pg.set_viewport_size({'width': w, 'height': h})

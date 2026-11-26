@@ -228,3 +228,9 @@ input[type=tel],input:not([type]),textarea{width:100%;font:16px var(--sans);padd
 .pay-terms{font-size:13px;opacity:.85;max-width:420px;margin:14px 0 4px}
 .pay-status{min-height:20px;font-size:14.5px;color:var(--gold2);margin:6px 0}
 .link.light{color:#fff;opacity:.9}
+
+/* staff test version */
+.staff-banner{position:fixed;left:0;right:0;bottom:0;z-index:45;background:#d4a017;color:#3a2205;font:700 12px var(--sans);text-align:center;padding:5px 8px calc(5px + env(safe-area-inset-bottom));letter-spacing:.2px;pointer-events:none}
+body.staff .screen{padding-bottom:calc(52px + env(safe-area-inset-bottom))}
+body.staff .toast{bottom:calc(46px + env(safe-area-inset-bottom))}
+.staff-tag{margin:-24px 0 26px;background:#d4a017;color:#3a2205;font-weight:700;font-size:13px;padding:4px 12px;border-radius:12px}

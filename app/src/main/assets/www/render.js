@@ -495,7 +495,21 @@ const TR = (() => {
     for (const w of words) { const test = line ? line + ' ' + w : w; if (ctx.measureText(test).width > maxW && line) { ctx.fillText(line, x, y + n * lh); line = w; if (++n >= maxLines) return; } else line = test; }
     if (line) ctx.fillText(line, x, y + n * lh);
   }
+  let staffMark = false;
+  function testWatermark(ctx) {
+    // Diagonal "TEST VERSION" across the whole photo: saved looks from the staff build can't be passed off as real
+    ctx.save(); ctx.translate(W / 2, H / 2); ctx.rotate(-Math.PI / 6);
+    ctx.font = 'bold 54px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let y = -900; y <= 900; y += 220) for (let x = -900; x <= 900; x += 640) {
+      ctx.fillStyle = 'rgba(255,255,255,.26)'; ctx.fillText('TEST VERSION', x + (y / 220 % 2 ? 320 : 0), y);
+      ctx.fillStyle = 'rgba(0,0,0,.14)'; ctx.fillText('TEST VERSION', x + (y / 220 % 2 ? 320 : 0) + 2, y + 2);
+    }
+    ctx.restore();
+    ctx.save(); ctx.fillStyle = '#d4a017'; ctx.fillRect(0, H - 104, W, 30); ctx.fillStyle = '#3a2205'; ctx.font = 'bold 17px system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('TEST VERSION · STAFF ONLY · NOT FOR SALE', W / 2, H - 83); ctx.restore();
+  }
   function brand(ctx, st, assets) {
+    if (staffMark) testWatermark(ctx);
     const theme = { maroon: ['#6e0f2d', '#d4a017'], peacock: ['#0b4a40', '#e0b44c'], rose: ['#9c2f52', '#f3e3d3'] }[st.theme || 'maroon'];
     if (st.shop) {
       ctx.save(); const g = ctx.createLinearGradient(0, 0, 0, 150); g.addColorStop(0, alpha(theme[0], 0.92)); g.addColorStop(1, alpha(theme[0], 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, 150);
@@ -575,5 +589,5 @@ const TR = (() => {
     brand(o, st, assets); return out;
   }
 
-  return { brandImage, W, H, PALETTE, OUTFITS, CODES, BGS, SKINS, drawBg, drawModel, preparePerson, compose, photoTile, borderTile, recolorTile, avgColor, mk, disableAI: false, _geometryFromMask: geometryFromMask };
+  return { setStaff: v => { staffMark = !!v; }, brandImage, W, H, PALETTE, OUTFITS, CODES, BGS, SKINS, drawBg, drawModel, preparePerson, compose, photoTile, borderTile, recolorTile, avgColor, mk, disableAI: false, _geometryFromMask: geometryFromMask };
 })();

@@ -76,5 +76,7 @@ jobs:
           body: |
             **AI TrialRoom** — digital trial room. Developed by Gundal Business Pvt Ltd, Bengaluru (gundalg@gmail.com).
             Download the APK below and open it on your Android phone (allow "Install unknown apps" when asked).
-          files: dist/*.apk
+          files: |
+            dist/*.apk
+            dist/*.aab
           make_latest: true

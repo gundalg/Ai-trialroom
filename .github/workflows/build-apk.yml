@@ -41,7 +41,7 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
       - uses: gradle/actions/setup-gradle@v4
-        with: { gradle-version: '8.9' }
+        with: { gradle-version: '8.13' }
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
       - name: Obfuscate the app code that goes into the APK
@@ -58,10 +58,16 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
+          # Test edition APK (direct install, no subscription needed)
           gradle assembleRelease --no-daemon --stacktrace
           mkdir -p dist && cp app/build/outputs/apk/release/app-release.apk dist/AI-TrialRoom-v1.0.${{ github.run_number }}.apk
+          # Google Play edition bundle (.aab), unsigned here; signed with the private upload key before uploading
+          PLAY_EDITION=1 NO_SIGN=1 gradle bundleRelease --no-daemon --stacktrace
+          cp app/build/outputs/bundle/release/app-release.aab dist/AI-TrialRoom-Play-v1.0.${{ github.run_number }}-unsigned.aab
       - uses: actions/upload-artifact@v4
         with: { name: AI-TrialRoom-APK, path: dist/*.apk }
+      - uses: actions/upload-artifact@v4
+        with: { name: AI-TrialRoom-Play-bundle, path: dist/*.aab }
       - name: Publish download (GitHub Release)
         uses: softprops/action-gh-release@v2
         with:

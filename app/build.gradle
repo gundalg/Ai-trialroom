@@ -2,16 +2,22 @@ plugins { id 'com.android.application' }
 
 android {
     namespace 'com.gundal.aitrialroom'
-    compileSdk 34
+    compileSdk 36
 
     defaultConfig {
         applicationId 'com.gundal.aitrialroom'
         minSdk 24
-        targetSdk 34
+        targetSdk 36
         def vc = System.getenv('VERSION_CODE')
         if (vc == null || vc.isEmpty()) vc = '1'
         versionCode = Integer.parseInt(vc)
         versionName = '1.0.' + vc
+        // PLAY_EDITION=1 -> Google Play version (subscription required); otherwise test edition for direct install
+        buildConfigField 'boolean', 'PLAY_EDITION', (System.getenv('PLAY_EDITION') == '1') ? 'true' : 'false'
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     signingConfigs {
@@ -32,7 +38,9 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             def ksFile = System.getenv('KEYSTORE_FILE')
             boolean hasKey = ksFile != null && !ksFile.isEmpty() && file(ksFile).exists()
-            signingConfig = hasKey ? signingConfigs.release : signingConfigs.debug
+            // NO_SIGN=1: leave the Play bundle unsigned here; it is signed afterwards with the private upload key
+            boolean noSign = System.getenv('NO_SIGN') == '1'
+            signingConfig = noSign ? null : (hasKey ? signingConfigs.release : signingConfigs.debug)
         }
     }
 
@@ -49,4 +57,9 @@ android {
     androidResources {
         noCompress 'wasm', 'tflite', 'binarypb', 'data'
     }
+}
+
+dependencies {
+    // Google Play Billing (subscriptions); Play requires version 8 or newer from 31 Aug 2026
+    implementation 'com.android.billingclient:billing:8.3.0'
 }

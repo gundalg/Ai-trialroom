@@ -104,6 +104,27 @@
     </div>
   </section>
 
+  <!-- Subscription (Google Play edition) -->
+  <section class="screen" id="s-paywall">
+    <div class="pay">
+      <svg class="logo-l"><use href="#glogo"/></svg>
+      <p class="pay-kicker">AI TrialRoom</p>
+      <h2 class="pay-title" id="payTitle">Your first month is free</h2>
+      <p class="pay-price" id="payPrice">Then ₹365 a year. That's just <b>₹1 a day</b>.</p>
+      <ul class="pay-list">
+        <li>Unlimited try-ons: sarees, lehengas, suits, sherwanis and more</li>
+        <li>Your shop's logo and address on every photo</li>
+        <li>Showroom backgrounds and AI models</li>
+        <li>Colour changes in one tap, with the saree border kept the same</li>
+        <li>Customer photos stay on your phone</li>
+      </ul>
+      <button class="btn gold" id="btnSubscribe">Start my free month</button>
+      <p class="pay-terms" id="payTerms">Free for 1 month, then ₹365 per year, renewing automatically through Google Play. Cancel anytime in Google Play → Payments &amp; subscriptions. If you cancel before the free month ends, you pay nothing.</p>
+      <p class="pay-status" id="payStatus"></p>
+      <button class="link light" id="btnRestore">Already subscribed? Restore</button>
+    </div>
+  </section>
+
   <!-- Shop setup -->
   <section class="screen" id="s-shop">
     <header class="top"><button class="back" data-back>‹</button><span>Your shop</span></header>
@@ -269,6 +290,7 @@
     <header class="top"><button class="back" data-back>‹</button><span>Settings</span></header>
     <div class="pad">
       <div class="card"><b>Account</b><p class="sub" id="acctInfo"></p></div>
+      <div class="card" id="subCard"><b>Subscription</b><p class="sub" id="subInfo"></p><a class="btn ghost hidden" id="subManage" href="https://play.google.com/store/account/subscriptions?sku=ai_trialroom_yearly&amp;package=com.gundal.aitrialroom">Manage subscription in Google Play</a></div>
       <div class="card" id="aiCard">
         <b>Real AI draping (Google Gemini)</b>
         <p class="sub" id="aiStatus">Not set up yet.</p>

@@ -32,7 +32,10 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.Toast;
+import android.window.OnBackInvokedDispatcher;
+import android.view.WindowInsets;
 
 import org.json.JSONObject;
 
@@ -69,6 +72,7 @@ public class MainActivity extends Activity {
     private static final int REQ_FILE = 41, REQ_PERM = 42;
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
+    private BillingManager billing;
     private Uri cameraUri;
     private File cameraFile;
     private final Map<String, String> httpResults = new ConcurrentHashMap<>();
@@ -87,14 +91,51 @@ public class MainActivity extends Activity {
         }
         WebView.setWebContentsDebuggingEnabled(false);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
+        // Edge-to-edge on every Android version (Android 15+ enforces it): the maroon background shows behind
+        // the status and navigation bars, and the app content is kept inside the safe area using window insets.
         Window w = getWindow();
-        w.setStatusBarColor(Color.parseColor("#6e0f2d"));
-        w.setNavigationBarColor(Color.parseColor("#2a1a16"));
+        if (Build.VERSION.SDK_INT >= 30) {
+            w.setDecorFitsSystemWindows(false);
+        } else {
+            w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
+        if (Build.VERSION.SDK_INT < 35) {
+            w.setStatusBarColor(Color.TRANSPARENT);
+            w.setNavigationBarColor(Color.TRANSPARENT);
+        }
 
+        final FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.parseColor("#6e0f2d"));
         web = new WebView(this);
         web.setBackgroundColor(Color.parseColor("#fbf5ec"));
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        setContentView(web);
+        root.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        setContentView(root);
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            int l, t, r, b;
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                android.graphics.Insets ime = insets.getInsets(WindowInsets.Type.ime());
+                l = bars.left; t = bars.top; r = bars.right; b = Math.max(bars.bottom, ime.bottom);
+            } else {
+                l = insets.getSystemWindowInsetLeft(); t = insets.getSystemWindowInsetTop();
+                r = insets.getSystemWindowInsetRight(); b = insets.getSystemWindowInsetBottom();
+            }
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) web.getLayoutParams();
+            if (lp.leftMargin != l || lp.topMargin != t || lp.rightMargin != r || lp.bottomMargin != b) {
+                lp.setMargins(l, t, r, b);
+                web.setLayoutParams(lp);
+            }
+            return insets;
+        });
+
+        // Android 13+ back gesture (required behaviour when targeting Android 16)
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::handleBack);
+        }
+
+        // Google Play edition: subscription (1 month free, then yearly)
+        if (BuildConfig.PLAY_EDITION) billing = new BillingManager(this);
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -284,11 +325,23 @@ public class MainActivity extends Activity {
         }
     }
 
-    @Override
-    public void onBackPressed() {
+    private void handleBack() {
+        if (web == null) { finish(); return; }
         web.evaluateJavascript("(window.ATR && ATR.back()) ? 'y' : 'n'", v -> {
-            if (v == null || !v.contains("y")) MainActivity.super.onBackPressed();
+            if (v == null || !v.contains("y")) finish();
         });
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void onBackPressed() {
+        handleBack();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (billing != null) billing.refresh();   // picks up a subscription bought, renewed or cancelled meanwhile
     }
 
     @Override
@@ -300,6 +353,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         pool.shutdownNow();
+        if (billing != null) billing.end();
         if (isFinishing()) clearCaptures();
         if (web != null) { web.destroy(); web = null; }
         super.onDestroy();
@@ -343,6 +397,20 @@ public class MainActivity extends Activity {
 
     /** Exposed to the web app as window.AndroidBridge */
     private class Bridge {
+        @JavascriptInterface
+        public boolean billingRequired() { return BuildConfig.PLAY_EDITION; }
+
+        @JavascriptInterface
+        public String billingStatus() {
+            return billing == null ? "{\"state\":\"test\"}" : billing.statusJson();
+        }
+
+        @JavascriptInterface
+        public void billingBuy() { if (billing != null) billing.buy(); }
+
+        @JavascriptInterface
+        public void billingRefresh() { if (billing != null) billing.refresh(); }
+
         @JavascriptInterface
         public String httpStart(final String method, final String url, final String headers, final String body) {
             final String id = "h" + httpIds.getAndIncrement();

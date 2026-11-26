@@ -213,3 +213,18 @@ input[type=tel],input:not([type]),textarea{width:100%;font:16px var(--sans);padd
 .qc-sw button span{position:absolute;left:50%;top:48px;transform:translateX(-50%);font-size:10.5px;color:var(--mute);white-space:nowrap}
 .qc-sw{padding-bottom:22px}
 .qcolors.busyc{opacity:.6;pointer-events:none}
+
+/* subscription screen */
+.pay{min-height:100vh;display:flex;flex-direction:column;align-items:center;text-align:center;padding:calc(36px + env(safe-area-inset-top)) 22px 28px;color:#fff;
+  background:radial-gradient(120% 70% at 50% 0%,var(--p2),var(--p) 55%,#3a0718)}
+.logo-l{width:84px;height:84px;filter:drop-shadow(0 6px 18px rgba(0,0,0,.35))}
+.pay-kicker{margin:12px 0 0;font-weight:600;opacity:.85}
+.pay-title{color:#fff;font-size:34px;margin:6px 0 4px}
+.pay-price{font-size:19px;margin:0 0 18px;color:var(--gold2)}.pay-price b{color:#fff}
+.pay-list{list-style:none;padding:0;margin:0 0 20px;text-align:left;max-width:420px;width:100%}
+.pay-list li{padding:10px 0 10px 34px;position:relative;border-bottom:1px solid rgba(255,255,255,.14);font-size:15.5px}
+.pay-list li::before{content:"✓";position:absolute;left:4px;top:9px;width:22px;height:22px;border-radius:50%;background:var(--gold);color:#3a2205;display:grid;place-items:center;font-weight:800;font-size:13px}
+.pay .btn{max-width:420px}
+.pay-terms{font-size:13px;opacity:.85;max-width:420px;margin:14px 0 4px}
+.pay-status{min-height:20px;font-size:14.5px;color:var(--gold2);margin:6px 0}
+.link.light{color:#fff;opacity:.9}

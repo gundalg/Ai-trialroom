@@ -38,7 +38,7 @@
   function back() {
     if ($('modal') && !$('modal').classList.contains('hidden')) { $('modal').classList.add('hidden'); return true; }
     const cur = document.querySelector('.screen.active').id.slice(2);
-    if (cur === 'home' || cur === 'splash' || cur === 'pin' || !stack.length) return false;
+    if (cur === 'home' || cur === 'splash' || cur === 'pin' || cur === 'paywall' || !stack.length) return false;
     let prev = stack.pop(); if (prev === 'result') prev = stack.pop() || 'home';
     go(prev, false); return true;
   }
@@ -47,7 +47,42 @@
 
   const enter = {};
   function applyTheme() { document.body.dataset.theme = S.theme || 'maroon'; }
-  function routeAfterLogin() { stack.length = 0; if (S.role === 'owner' && !S.shop) go('shop', false); else go('home', false); }
+  function routeAfterLogin() {
+    stack.length = 0;
+    if (needsPay()) { go('paywall', false); return; }
+    if (S.role === 'owner' && !S.shop) go('shop', false); else go('home', false);
+  }
+
+  /* ---------- subscription (Google Play edition): 1 month free, then ₹365/year ---------- */
+  const PLAY = !!(window.AndroidBridge && AndroidBridge.billingRequired && AndroidBridge.billingRequired());
+  const payStatus = () => { try { return JSON.parse(AndroidBridge.billingStatus()); } catch (e) { return { state: 'error' }; } };
+  let subActive = false;
+  const needsPay = () => PLAY && !subActive && payStatus().state !== 'active';
+  let payTimer = null;
+  function paintPay() {
+    const st = payStatus(), btn = $('btnSubscribe');
+    if (st.state === 'active') { subActive = true; clearInterval(payTimer); toast('Subscription active ✓ Welcome!'); routeAfterLogin(); return; }
+    const price = st.price || '₹365';
+    if (st.ready && !st.trial) { $('payTitle').textContent = 'Subscribe to AI TrialRoom'; btn.textContent = `Subscribe for ${price} a year`; $('payTerms').textContent = `${price} per year, renewing automatically through Google Play. Cancel anytime in Google Play → Payments & subscriptions.`; }
+    else { $('payTitle').textContent = 'Your first month is free'; btn.textContent = 'Start my free month'; $('payTerms').textContent = `Free for 1 month, then ${price} per year, renewing automatically through Google Play. Cancel anytime in Google Play → Payments & subscriptions. If you cancel before the free month ends, you pay nothing.`; }
+    $('payPrice').innerHTML = `Then ${price} a year. That's just <b>₹1 a day</b>.`;
+    if (!st.ready || !st.trial) $('payPrice').innerHTML = st.ready ? `${price} a year. That's just <b>₹1 a day</b>.` : $('payPrice').innerHTML;
+    const msg = { loading: 'Connecting to Google Play…', pending: 'Your payment is being processed by Google Play. This screen updates by itself.', unavailable: 'Google Play billing is not available on this phone. Please install AI TrialRoom from the Google Play Store.', error: 'Could not reach Google Play. Please check the internet connection.' }[st.state] || '';
+    $('payStatus').textContent = st.message === 'cancelled' ? 'Purchase cancelled. You can start your free month any time.' : (st.message && st.state !== 'none' ? st.message : msg);
+    btn.disabled = st.state === 'unavailable' || st.state === 'pending';
+  }
+  enter.paywall = () => { clearInterval(payTimer); paintPay(); payTimer = setInterval(() => { if (document.querySelector('.screen.active').id !== 's-paywall') { clearInterval(payTimer); return; } paintPay(); }, 1000); };
+  $('btnSubscribe').onclick = () => { try { AndroidBridge.billingBuy(); } catch (e) {} $('payStatus').textContent = 'Opening Google Play…'; };
+  $('btnRestore').onclick = () => { try { AndroidBridge.billingRefresh(); } catch (e) {} $('payStatus').textContent = 'Checking your Google Play subscription…'; };
+  // When the app comes back (subscription may have ended or been bought on another screen), check again
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !PLAY) return;
+    setTimeout(() => {
+      const cur = document.querySelector('.screen.active').id.slice(2), st = payStatus().state;
+      if (st === 'active') subActive = true;
+      else if (st === 'none' && !['splash', 'role', 'phone', 'consent', 'pin', 'paywall'].includes(cur)) { subActive = false; stack.length = 0; go('paywall', false); }
+    }, 1500);
+  });
 
   /* ---------- splash / role ---------- */
   $('btnStart').onclick = () => { if (S.verified && S.consentAt && S.role) openPin(S.pin ? 'unlock' : 'create'); else go('role'); };
@@ -507,6 +542,9 @@
   $('optAutoLock').onchange = e => { S.autoLock = e.target.checked; save(); };
   $('btnChangePin').onclick = () => openPin(S.pin ? 'change' : 'create', 'settings');
   enter.settings = () => { renderAI();
+    const st = PLAY ? payStatus() : null;
+    $('subInfo').textContent = !PLAY ? 'Test edition: no subscription needed.' : st.state === 'active' ? `Active ✓ · ${st.price || '₹365'} per year (₹1 a day). Renews automatically through Google Play.` : 'Not active.';
+    $('subManage').classList.toggle('hidden', !PLAY);
     $('optStrict').checked = S.genderStrict !== false; $('optSecure').checked = S.secureScreen !== false; $('optAutoLock').checked = S.autoLock !== false;
     $('optSecure').closest('label').classList.toggle('hidden', !(window.AndroidBridge && AndroidBridge.setSecure)); $('acctInfo').textContent = `${S.role === 'owner' ? 'Shop owner' : 'Individual'} · +91 ${S.phone || ''} · verified ${S.verifiedAt ? new Date(S.verifiedAt).toLocaleDateString() : ''}`; $('btnEditShop').classList.toggle('hidden', S.role !== 'owner'); };
   $('btnEditShop').onclick = () => go('shop');

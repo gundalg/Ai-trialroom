@@ -452,6 +452,50 @@ with sync_playwright() as p:
     pg.click('#qcParts button[data-p=shirt]'); check('shirt colours offered', pg.query_selector('#qcSw button[data-h="#87c2e8"]') is not None)
     shot('qc_male_suit')
 
+
+    # ---------- Google Play edition: 1 month free, then ₹365/year (simulated Google Play) ----------
+    ctx2 = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2)
+    ctx2.add_init_script("""window.__pay={state:'loading',price:'',trial:'',ready:false,message:''};
+      window.AndroidBridge={billingRequired:()=>true,billingStatus:()=>JSON.stringify(window.__pay),
+        billingBuy:()=>{window.__bought=(window.__bought||0)+1;},billingRefresh:()=>{window.__refreshed=(window.__refreshed||0)+1;}};
+      window.addEventListener('DOMContentLoaded',()=>{ try { GENDER.disabled = true; } catch (e) {} });""")
+    q = ctx2.new_page()
+    q.on('pageerror', lambda e: errors.append('pageerror(play): ' + str(e)))
+    q.goto(f'http://127.0.0.1:{PORT}/index.html'); q.wait_for_load_state('networkidle')
+    qa = lambda: q.evaluate("document.querySelector('.screen.active').id")
+    q.click('#btnStart'); q.click('#roleOwner'); q.fill('#phone', '9876500001'); q.click('#btnSendOtp')
+    q.fill('#otp', q.evaluate("document.getElementById('otpNote').textContent.match(/\\d{6}/)[0]")); q.wait_for_timeout(200)
+    for c in q.query_selector_all('.cbx'): c.check()
+    q.click('#btnAgree'); q.fill('#pin1', PW); q.fill('#pin2', PW); q.click('#btnPin')
+    q.wait_for_selector('#s-paywall.active'); check('Play edition: subscription screen after sign-up', qa() == 's-paywall')
+    check('while connecting, says so', 'Connecting to Google Play' in q.inner_text('#payStatus'))
+    q.evaluate("window.__pay={state:'none',price:'₹365.00',trial:'P1M',ready:true,message:''}"); q.wait_for_timeout(1200)
+    check('offer shows "first month is free" and ₹1 a day', 'first month is free' in q.inner_text('#payTitle') and '₹1 a day' in q.inner_text('#payPrice') and '₹365.00' in q.inner_text('#payTerms'))
+    check('clear cancellation terms shown', 'Cancel anytime' in q.inner_text('#payTerms') and 'pay nothing' in q.inner_text('#payTerms'))
+    shot_q = lambda n: q.screenshot(path=os.path.join(OUT, n + '.png'), full_page=True)
+    shot_q('pay_01_offer')
+    check('back button cannot skip the subscription screen', q.evaluate('ATR.back()') is False and qa() == 's-paywall')
+    q.click('#btnSubscribe'); check('"Start my free month" opens Google Play purchase', q.evaluate('window.__bought') == 1)
+    q.evaluate("window.__pay={state:'pending',price:'₹365.00',trial:'P1M',ready:true,message:''}"); q.wait_for_timeout(1200)
+    check('pending payment explained, button paused', 'being processed' in q.inner_text('#payStatus') and q.is_disabled('#btnSubscribe'))
+    q.evaluate("window.__pay={state:'active',price:'₹365.00',trial:'P1M',ready:true,message:''}")
+    q.wait_for_selector('#s-shop.active', timeout=5000); check('after subscribing -> shop setup continues', qa() == 's-shop')
+    q.fill('#shopName', 'Gundal Silks'); q.fill('#shopAddr', 'Avenue Road, Bengaluru 560002'); q.click('#btnShopSave'); q.wait_for_selector('#s-home.active')
+    q.click('#btnSettings'); check('Settings shows active subscription + manage link', 'Active' in q.inner_text('#subInfo') and '₹1 a day' in q.inner_text('#subInfo') and q.is_visible('#subManage'))
+    href = q.get_attribute('#subManage', 'href'); check('manage link goes to Google Play subscriptions', 'play.google.com/store/account/subscriptions' in href and 'com.gundal.aitrialroom' in href)
+    q.evaluate("ATR.back()")
+    q.evaluate("window.__pay={state:'none',price:'₹365.00',trial:'',ready:true,message:''}")
+    q.evaluate("Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});document.dispatchEvent(new Event('visibilitychange'))")
+    q.wait_for_selector('#s-paywall.active', timeout=5000); check('expired/cancelled subscription -> back to subscription screen', qa() == 's-paywall')
+    q.wait_for_timeout(1200)
+    check('no second free month: offers ₹365/year instead', 'Subscribe for ₹365.00 a year' in q.inner_text('#btnSubscribe'))
+    shot_q('pay_02_renew')
+    q.click('#btnRestore'); check('"Restore" re-checks Google Play', q.evaluate('window.__refreshed') >= 1)
+    q.evaluate("window.__pay={state:'unavailable',price:'',trial:'',ready:false,message:''}"); q.wait_for_timeout(1200)
+    check('no Google Play on phone -> clear message, button off', 'install AI TrialRoom from the Google Play Store' in q.inner_text('#payStatus') and q.is_disabled('#btnSubscribe'))
+    ctx2.close()
+    check('test edition (direct install) never asks for a subscription', pg.evaluate("ATR.state().role") is not None and pg.query_selector('#s-paywall.active') is None)
+
     # ---------- every screen size: small phone, phone, tablet, computer ----------
     for w, h, tag in [(320, 640, 'phone_small'), (390, 844, 'phone'), (800, 1280, 'tablet'), (1366, 768, 'computer'), (844, 390, 'phone_landscape')]:
         pg.set_viewport_size({'width': w, 'height': h})
